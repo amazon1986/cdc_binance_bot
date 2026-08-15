@@ -121,3 +121,25 @@ export async function resetBotServerPaperAccount(): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Saves encrypted Binance API keys to backend server for 24/7 automated execution.
+ */
+export async function saveBinanceKeysToServer(keys: {
+  apiKey: string;
+  apiSecret: string;
+  isTestnet: boolean;
+  marketType?: 'SPOT' | 'FUTURES';
+  marginType?: 'ISOLATED' | 'CROSSED';
+}): Promise<boolean> {
+  try {
+    const res = await fetch('/api/binance/keys', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(keys),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}

@@ -32,6 +32,7 @@ import {
   closePositionOnServer,
   clearBotServerLogs,
   resetBotServerPaperAccount,
+  saveBinanceKeysToServer,
 } from './lib/botApi';
 import {
   fetchBinanceKlines,
@@ -257,10 +258,11 @@ export default function App() {
     await saveBotServerConfig(updated);
   };
 
-  const handleSaveBinanceKeys = (updatedKeys: BinanceApiKeys) => {
+  const handleSaveBinanceKeys = async (updatedKeys: BinanceApiKeys) => {
     setBinanceKeys(updatedKeys);
     saveBinanceKeys(updatedKeys);
-    showToast(`อัปเดต Binance API Key เรียบร้อย (${updatedKeys.isTestnet ? 'Testnet' : 'Live'})`, 'info');
+    await saveBinanceKeysToServer(updatedKeys);
+    showToast(`อัปเดต Binance API Key เรียบร้อย (${updatedKeys.isTestnet ? 'Testnet' : 'Live'} | ${updatedKeys.marketType || 'SPOT'})`, 'info');
   };
 
   const handleResetPaperAccount = async () => {

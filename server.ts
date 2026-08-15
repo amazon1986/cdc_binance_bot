@@ -57,7 +57,13 @@ interface ServerState {
   paperAccount: PaperAccount;
   tradeHistory: ExecutedTrade[];
   botLogs: string[];
-  liveApiKeys?: { apiKey: string; apiSecret: string; isTestnet: boolean };
+  liveApiKeys?: {
+    apiKey: string;
+    apiSecret: string;
+    isTestnet: boolean;
+    marketType?: 'SPOT' | 'FUTURES';
+    marginType?: 'ISOLATED' | 'CROSSED';
+  };
 }
 
 const DEFAULT_SERVER_STATE: ServerState = {
@@ -807,6 +813,157 @@ app.post('/api/binance/order', orderLimiter, async (req, res) => {
     const data = await response.json();
     if (!response.ok) {
       return res.status(response.status).json({ error: data.msg || 'Binance order rejected' });
+    }
+
+    return res.json({ success: true, order: data });
+  } catch (error: any) {
+    return res.status(500).json({ error: sanitizeErrorMessage(error) });
+  }
+});
+
+// Save Encrypted API Keys to Server for 24/7 Live Automation
+app.post('/api/binance/keys', (req, res) => {
+  try {
+    const { apiKey, apiSecret, isTestnet, marketType = 'SPOT', marginType = 'ISOLATED' } = req.body;
+    if (!apiKey || !apiSecret) {
+      return res.status(400).json({ error: 'Missing API Key credentials' });
+    }
+    serverState.liveApiKeys = { apiKey, apiSecret, isTestnet: !!isTestnet, marketType, marginType };
+    saveServerState();
+    addServerLog(`🔑 ซิงก์ Binance API Key ขึ้นเซิร์ฟเวอร์เรียบร้อย (${isTestnet ? 'Testnet' : 'Live'} | ${marketType})`);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: sanitizeErrorMessage(err) });
+  }
+});
+
+// Binance Futures Account Balance Proxy Endpoint
+app.post('/api/binance/futures/account', async (req, res) => {
+  try {
+    const { apiKey, apiSecret, isTestnet } = req.body;
+    if (!apiKey || !apiSecret) {
+      return res.status(400).json({ error: 'Invalid API credentials' });
+    }
+
+    const baseUrl = isTestnet
+      ? 'https://testnet.binancefuture.com/fapi/v2'
+      : 'https://fapi.binance.com/fapi/v2';
+
+    const { timestamp, recvWindow } = await getBinanceTimestamp(baseUrl);
+    const queryString = `recvWindow=${recvWindow}&timestamp=${timestamp}`;
+    const signedQuery = buildBinanceSignedQuery(queryString, apiSecret);
+
+    const response = await fetch(`${baseUrl}/account?${signedQuery}`, {
+      headers: { 'X-MBX-APIKEY': apiKey },
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      return res.status(response.status).json({ error: data.msg || 'Binance Futures Account API error' });
+    }
+
+    return res.json({
+      success: true,
+      canTrade: data.canTrade,
+      feeTier: data.feeTier,
+      assets: data.assets || [],
+      positions: data.positions || [],
+    });
+  } catch (error: any) {
+    return res.status(500).json({ error: sanitizeErrorMessage(error) });
+  }
+});
+
+// Binance Futures Set Leverage Proxy Endpoint
+app.post('/api/binance/futures/leverage', async (req, res) => {
+  try {
+    const { apiKey, apiSecret, isTestnet, symbol: rawSymbol, leverage } = req.body;
+    if (!apiKey || !apiSecret) {
+      return res.status(400).json({ error: 'Invalid API credentials' });
+    }
+
+    const symbol = sanitizeSymbol(rawSymbol);
+    if (!symbol) return res.status(400).json({ error: 'Invalid symbol format' });
+
+    const lev = Math.min(Math.max(1, parseInt(String(leverage || 1), 10)), 10);
+    const baseUrl = isTestnet
+      ? 'https://testnet.binancefuture.com/fapi/v1'
+      : 'https://fapi.binance.com/fapi/v1';
+
+    const { timestamp, recvWindow } = await getBinanceTimestamp(baseUrl);
+    const queryString = `symbol=${symbol}&leverage=${lev}&recvWindow=${recvWindow}&timestamp=${timestamp}`;
+    const signedQuery = buildBinanceSignedQuery(queryString, apiSecret);
+
+    const response = await fetch(`${baseUrl}/leverage?${signedQuery}`, {
+      method: 'POST',
+      headers: { 'X-MBX-APIKEY': apiKey },
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      return res.status(response.status).json({ error: data.msg || 'Failed to set Futures leverage' });
+    }
+
+    return res.json({ success: true, leverage: data.leverage, symbol: data.symbol });
+  } catch (error: any) {
+    return res.status(500).json({ error: sanitizeErrorMessage(error) });
+  }
+});
+
+// Binance Futures Order Proxy Endpoint
+app.post('/api/binance/futures/order', orderLimiter, async (req, res) => {
+  try {
+    const { apiKey, apiSecret, isTestnet, symbol: rawSymbol, side: rawSide, quantity, price, orderType: rawOrderType = 'MARKET', reduceOnly } = req.body;
+
+    if (!apiKey || !apiSecret) {
+      return res.status(400).json({ error: 'Invalid API credentials' });
+    }
+
+    const symbol = sanitizeSymbol(rawSymbol);
+    if (!symbol) return res.status(400).json({ error: 'Invalid symbol format' });
+
+    const side = String(rawSide).toUpperCase();
+    if (!VALID_SIDE_VALUES.includes(side)) return res.status(400).json({ error: 'Invalid side' });
+
+    const orderType = String(rawOrderType).toUpperCase();
+    if (!VALID_ORDER_TYPES.includes(orderType)) return res.status(400).json({ error: 'Invalid order type' });
+
+    const qty = parseFloat(quantity);
+    if (isNaN(qty) || qty <= 0) return res.status(400).json({ error: 'Invalid quantity' });
+
+    const baseUrl = isTestnet
+      ? 'https://testnet.binancefuture.com/fapi/v1'
+      : 'https://fapi.binance.com/fapi/v1';
+
+    const { timestamp, recvWindow } = await getBinanceTimestamp(baseUrl);
+    let queryParts = [
+      `symbol=${symbol}`,
+      `side=${side}`,
+      `type=${orderType}`,
+      `quantity=${qty}`,
+      `recvWindow=${recvWindow}`,
+      `timestamp=${timestamp}`,
+    ];
+
+    if (reduceOnly) {
+      queryParts.push(`reduceOnly=true`);
+    }
+
+    if (orderType === 'LIMIT' && price) {
+      queryParts.push(`price=${parseFloat(price)}`, `timeInForce=GTC`);
+    }
+
+    const queryString = queryParts.join('&');
+    const signedQuery = buildBinanceSignedQuery(queryString, apiSecret);
+
+    const response = await fetch(`${baseUrl}/order?${signedQuery}`, {
+      method: 'POST',
+      headers: { 'X-MBX-APIKEY': apiKey },
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      return res.status(response.status).json({ error: data.msg || 'Binance Futures order rejected' });
     }
 
     return res.json({ success: true, order: data });

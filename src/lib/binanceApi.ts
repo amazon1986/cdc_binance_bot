@@ -297,16 +297,18 @@ export async function executeLiveBinanceOrder(params: {
 }
 
 /**
- * Fetches real account USDT balance from Binance signed endpoint
+ * Fetches real account USDT balance from Binance signed endpoint (Spot or Futures)
  */
 export async function fetchLiveBinanceUsdtBalance(keys: {
   apiKey: string;
   apiSecret: string;
   isTestnet: boolean;
+  marketType?: 'SPOT' | 'FUTURES';
 }): Promise<number | null> {
   if (!keys.apiKey || !keys.apiSecret) return null;
   try {
-    const res = await fetch('/api/binance/account', {
+    const endpoint = keys.marketType === 'FUTURES' ? '/api/binance/futures/account' : '/api/binance/account';
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(keys),
@@ -314,13 +316,73 @@ export async function fetchLiveBinanceUsdtBalance(keys: {
 
     if (!res.ok) return null;
     const data = await res.json();
-    if (!data.success || !data.balances) return null;
+    if (!data.success) return null;
 
-    const usdt = data.balances.find((b: any) => b.asset === 'USDT');
+    if (keys.marketType === 'FUTURES') {
+      const usdt = (data.assets || []).find((a: any) => a.asset === 'USDT');
+      return usdt ? parseFloat(usdt.availableBalance || usdt.walletBalance) : 0;
+    }
+
+    const usdt = (data.balances || []).find((b: any) => b.asset === 'USDT');
     return usdt ? parseFloat(usdt.free) : 0;
   } catch (err) {
     console.error('Failed to fetch live USDT balance:', err);
     return null;
+  }
+}
+
+/**
+ * Sets leverage for a symbol on Binance Futures API
+ */
+export async function setLiveBinanceFuturesLeverage(params: {
+  apiKey: string;
+  apiSecret: string;
+  isTestnet: boolean;
+  symbol: string;
+  leverage: number;
+}): Promise<{ success: boolean; leverage?: number; error?: string }> {
+  try {
+    const res = await fetch('/api/binance/futures/leverage', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) return { success: false, error: data.error };
+    return { success: true, leverage: data.leverage };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+/**
+ * Sends a signed Futures Live Order to Binance via backend proxy
+ */
+export async function executeLiveBinanceFuturesOrder(params: {
+  apiKey: string;
+  apiSecret: string;
+  isTestnet: boolean;
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  quantity: number;
+  price?: number;
+  orderType?: 'MARKET' | 'LIMIT';
+  reduceOnly?: boolean;
+}): Promise<{ success: boolean; order?: any; error?: string }> {
+  try {
+    const res = await fetch('/api/binance/futures/order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    });
+
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      return { success: false, error: data.error || 'Live Futures order failed' };
+    }
+    return { success: true, order: data.order };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Failed to connect to backend proxy' };
   }
 }
 

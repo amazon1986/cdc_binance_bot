@@ -60,6 +60,7 @@ export interface BotConfig {
   buyOnSignal: ('BLUE' | 'GREEN')[];
   sellOnSignal: ('YELLOW' | 'RED')[];
   mode: 'PAPER' | 'BINANCE_LIVE';
+  marketType?: 'SPOT' | 'FUTURES';
   scanMode?: 'SINGLE' | 'MULTI_SCAN';
   directionMode?: 'LONG_ONLY' | 'SHORT_ONLY' | 'BOTH';
   isActive: boolean;
@@ -158,6 +159,8 @@ export interface BinanceApiKeys {
   apiKey: string;
   apiSecret: string;
   isTestnet: boolean;
+  marketType?: 'SPOT' | 'FUTURES';
+  marginType?: 'ISOLATED' | 'CROSSED';
 }
 
 export interface AiAnalysisResponse {

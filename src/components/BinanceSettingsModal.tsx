@@ -22,6 +22,8 @@ export const BinanceSettingsModal: React.FC<BinanceSettingsModalProps> = ({
   const [apiKey, setApiKey] = useState(keys.apiKey);
   const [apiSecret, setApiSecret] = useState(keys.apiSecret);
   const [isTestnet, setIsTestnet] = useState(keys.isTestnet);
+  const [marketType, setMarketType] = useState<'SPOT' | 'FUTURES'>(keys.marketType || botConfig.marketType || 'SPOT');
+  const [marginType, setMarginType] = useState<'ISOLATED' | 'CROSSED'>(keys.marginType || 'ISOLATED');
   const [tradingMode, setTradingMode] = useState<'PAPER' | 'BINANCE_LIVE'>(botConfig.mode);
 
   const [isVerifying, setIsVerifying] = useState(false);
@@ -37,7 +39,8 @@ export const BinanceSettingsModal: React.FC<BinanceSettingsModalProps> = ({
     setIsVerifying(true);
     setVerifyStatus(null);
     try {
-      const res = await fetch('/api/binance/account', {
+      const endpoint = marketType === 'FUTURES' ? '/api/binance/futures/account' : '/api/binance/account';
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ apiKey, apiSecret, isTestnet }),
@@ -47,7 +50,7 @@ export const BinanceSettingsModal: React.FC<BinanceSettingsModalProps> = ({
       if (res.ok && data.success) {
         setVerifyStatus({
           success: true,
-          message: `เชื่อมต่อบัญชี Binance สัมฤทธิผล! (บัญชี ${data.accountType || 'SPOT'})`,
+          message: `เชื่อมต่อบัญชี Binance ${marketType} สัมฤทธิผล! (สิทธิ์การเทรด: ${data.canTrade ? 'พร้อมเทรด 🟢' : 'อ่านอย่างเดียว 🟡'})`,
           canTrade: data.canTrade,
         });
       } else {
@@ -68,8 +71,8 @@ export const BinanceSettingsModal: React.FC<BinanceSettingsModalProps> = ({
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    onSaveKeys({ apiKey, apiSecret, isTestnet });
-    onSaveConfig({ ...botConfig, mode: tradingMode });
+    onSaveKeys({ apiKey, apiSecret, isTestnet, marketType, marginType });
+    onSaveConfig({ ...botConfig, mode: tradingMode, marketType });
     onClose();
   };
 
@@ -123,6 +126,68 @@ export const BinanceSettingsModal: React.FC<BinanceSettingsModalProps> = ({
             </div>
           </div>
 
+          {/* Binance Market Type Selector: Spot vs Futures */}
+          <div className="space-y-2 bg-slate-950/80 p-3 rounded-xl border border-slate-800">
+            <label className="text-slate-200 font-bold block">เลือกประเภทตลาด Binance (Market Type)</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setMarketType('SPOT')}
+                className={`p-2.5 rounded-lg border text-left transition flex flex-col justify-between space-y-0.5 ${
+                  marketType === 'SPOT'
+                    ? 'bg-emerald-500/15 border-emerald-500/50 text-white font-bold'
+                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                }`}
+              >
+                <span className="text-emerald-400 font-bold">🛒 Binance Spot</span>
+                <span className="text-[10px] text-slate-400">ซื้อขายเหรียญจริง (LONG 1x)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setMarketType('FUTURES')}
+                className={`p-2.5 rounded-lg border text-left transition flex flex-col justify-between space-y-0.5 ${
+                  marketType === 'FUTURES'
+                    ? 'bg-amber-500/15 border-amber-500/50 text-white font-bold'
+                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                }`}
+              >
+                <span className="text-amber-400 font-bold">⚡ USDT-M Futures</span>
+                <span className="text-[10px] text-slate-400">LONG / SHORT & Leverage (1x-10x)</span>
+              </button>
+            </div>
+
+            {marketType === 'FUTURES' && (
+              <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between">
+                <span className="text-slate-400">ประเภท Margin (Futures):</span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setMarginType('ISOLATED')}
+                    className={`px-2.5 py-1 rounded text-[11px] font-bold border transition ${
+                      marginType === 'ISOLATED'
+                        ? 'bg-amber-500/20 text-amber-400 border-amber-500/50'
+                        : 'bg-slate-900 text-slate-400 border-slate-800'
+                    }`}
+                  >
+                    ISOLATED (แนะนำ)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMarginType('CROSSED')}
+                    className={`px-2.5 py-1 rounded text-[11px] font-bold border transition ${
+                      marginType === 'CROSSED'
+                        ? 'bg-amber-500/20 text-amber-400 border-amber-500/50'
+                        : 'bg-slate-900 text-slate-400 border-slate-800'
+                    }`}
+                  >
+                    CROSSED
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           {/* Binance API Key Input */}
           <div className="space-y-1">
             <label className="text-slate-300 font-medium block">Binance API Key</label>
@@ -150,9 +215,9 @@ export const BinanceSettingsModal: React.FC<BinanceSettingsModalProps> = ({
           {/* Network Switch: Testnet vs Mainnet */}
           <div className="flex items-center justify-between p-3 bg-slate-950 rounded-xl border border-slate-800">
             <div>
-              <span className="text-slate-200 font-semibold block">ใช้งาน Binance Spot Testnet</span>
+              <span className="text-slate-200 font-semibold block">ใช้งาน Binance {marketType} Testnet</span>
               <span className="text-[10px] text-slate-500">
-                สลับไปใช้ https://testnet.binance.vision สำหรับทดสอบ API โดยไม่เสียเงินจริง
+                สลับไปใช้ Testnet ({marketType === 'FUTURES' ? 'testnet.binancefuture.com' : 'testnet.binance.vision'}) ทดสอบโดยไม่ใช้เงินจริง
               </span>
             </div>
             <input
@@ -171,7 +236,7 @@ export const BinanceSettingsModal: React.FC<BinanceSettingsModalProps> = ({
             className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl font-semibold transition flex items-center justify-center space-x-2 disabled:opacity-50"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isVerifying ? 'animate-spin' : ''}`} />
-            <span>ทดสอบการเชื่อมต่อ API</span>
+            <span>ทดสอบการเชื่อมต่อ API ({marketType})</span>
           </button>
 
           {/* Verification Result Message */}
