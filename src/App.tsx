@@ -222,10 +222,12 @@ export default function App() {
       const updatedPositions = prev.activePositions.map((pos) => {
         const livePrice = tickerPriceMap.get(pos.symbol) || (pos.symbol === currentPriceInfo.symbol ? currentPriceInfo.price : 0);
         if (livePrice > 0) {
+          const posLev = pos.leverage || 1;
+          const margin = pos.marginUsdt || pos.usdtInvested;
           const pnlPercent = pos.side === 'SHORT'
-            ? ((pos.entryPrice - livePrice) / pos.entryPrice) * 100
-            : ((livePrice - pos.entryPrice) / pos.entryPrice) * 100;
-          const pnlUsdt = (pos.usdtInvested * pnlPercent) / 100;
+            ? ((pos.entryPrice - livePrice) / pos.entryPrice) * 100 * posLev
+            : ((livePrice - pos.entryPrice) / pos.entryPrice) * 100 * posLev;
+          const pnlUsdt = (margin * pnlPercent) / 100;
 
           if (Math.abs((pos.currentPnlUsdt || 0) - pnlUsdt) > 0.001) {
             hasChanges = true;

@@ -51,6 +51,7 @@ export interface BotConfig {
   usePercentBalance: boolean;
   balancePercent: number;
   positionSizingMode?: 'EQUAL_WEIGHT' | 'PERCENT_EQUITY' | 'FIXED_USDT';
+  leverage?: number; // Leverage 1x to 10x
   maxOpenPositions?: number;
   stopLossPercent: number; // 0 = disabled
   takeProfitPercent: number; // 0 = disabled
@@ -71,7 +72,10 @@ export interface PaperPosition {
   side: 'LONG' | 'SHORT';
   entryPrice: number;
   amount: number; // Number of coins
-  usdtInvested: number;
+  usdtInvested: number; // Initial Margin
+  marginUsdt?: number; // Margin reserved
+  leverage?: number; // Leverage 1x-10x used
+  liquidationPrice?: number; // Estimated liquidation price
   entryTime: number;
   stopLossPrice?: number;
   takeProfitPrice?: number;
@@ -97,6 +101,7 @@ export interface ExecutedTrade {
   price: number;
   amount: number;
   usdtValue: number;
+  leverage?: number;
   pnlUsdt?: number;
   pnlPercent?: number;
   reason: string;

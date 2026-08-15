@@ -62,6 +62,7 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
       tradeAmountUsdt: Number(configForm.tradeAmountUsdt) || 100,
       stopLossPercent: Number(configForm.stopLossPercent) || 0,
       takeProfitPercent: Number(configForm.takeProfitPercent) || 0,
+      leverage: Math.min(Math.max(1, Number(configForm.leverage) || 1), 10),
     };
     onSaveConfig(sanitizedConfig);
     setConfigForm(sanitizedConfig);
@@ -242,7 +243,12 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
             <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <span className="text-xs text-slate-400 block">สถานะโพสิชันปัจจุบัน</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-400 block">สถานะโพสิชันปัจจุบัน</span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-extrabold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                      {activePos.leverage || 1}x Leverage
+                    </span>
+                  </div>
                   <span className={`text-lg font-extrabold font-mono ${activePos.side === 'SHORT' ? 'text-rose-400' : 'text-emerald-400'}`}>
                     {activePos.side} {activePos.symbol}
                   </span>
@@ -264,19 +270,25 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800/80 text-xs font-mono">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-slate-800/80 text-xs font-mono">
                 <div>
                   <span className="text-slate-500 block text-[10px]">ราคาเข้า (Entry)</span>
                   <span className="text-slate-200">{formatCryptoPrice(activePos.entryPrice)}</span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block text-[10px]">จำนวนเหรียญ</span>
-                  <span className="text-slate-200">{formatCryptoAmount(activePos.amount)}</span>
+                  <span className="text-slate-500 block text-[10px]">ทุนประกัน (Margin)</span>
+                  <span className="text-emerald-400 font-bold">${(activePos.marginUsdt || activePos.usdtInvested).toFixed(2)}</span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block text-[10px]">มูลค่าปัจจุบัน</span>
+                  <span className="text-slate-500 block text-[10px]">มูลค่าสัญญา ({activePos.leverage || 1}x)</span>
                   <span className="text-slate-200">
                     ${(activePos.amount * currentPrice).toFixed(2)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-[10px]">ราคาล้างพอร์ต (Liq)</span>
+                  <span className="text-rose-400 font-bold">
+                    {activePos.liquidationPrice ? formatCryptoPrice(activePos.liquidationPrice) : '-'}
                   </span>
                 </div>
               </div>
@@ -493,6 +505,65 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono focus:border-emerald-500 disabled:opacity-60"
                 />
               </div>
+            </div>
+
+            {/* Leverage Control (1x - 10x) */}
+            <div className="p-3.5 bg-slate-950/80 border border-slate-800/80 rounded-xl space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                <span className="text-xs font-bold text-amber-400 flex items-center space-x-1.5">
+                  <Zap className="w-3.5 h-3.5 text-amber-400" />
+                  <span>อัตราคูณ เลเวอเรจ (Leverage Multiplier: 1x - 10x)</span>
+                </span>
+                <span className="text-[11px] font-mono text-amber-300 font-semibold">
+                  ทุน $100 ➔ เปิดสัญญาได้ ${(100 * (configForm.leverage || 1)).toLocaleString()} USDT ({configForm.leverage || 1}x)
+                </span>
+              </div>
+
+              <div className="space-y-2 bg-slate-900/80 p-3 rounded-lg border border-slate-800/60">
+                <div className="flex items-center justify-between text-xs font-mono">
+                  <span className="text-slate-400">เลือก Leverage:</span>
+                  <span className="text-amber-400 font-extrabold text-sm">{configForm.leverage || 1}x</span>
+                </div>
+
+                <input
+                  type="range"
+                  min="1"
+                  max="10"
+                  step="1"
+                  disabled={!isEditing}
+                  value={configForm.leverage || 1}
+                  onChange={(e) => setConfigForm({ ...configForm, leverage: Number(e.target.value) })}
+                  className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500 disabled:opacity-50"
+                />
+
+                <div className="flex items-center justify-between gap-1.5 pt-1">
+                  {[1, 2, 3, 5, 10].map((lev) => (
+                    <button
+                      key={lev}
+                      type="button"
+                      disabled={!isEditing}
+                      onClick={() => setConfigForm({ ...configForm, leverage: lev })}
+                      className={`flex-1 py-1 rounded text-[11px] font-bold font-mono transition border ${
+                        (configForm.leverage || 1) === lev
+                          ? 'bg-amber-500/20 text-amber-400 border-amber-500/50 shadow-sm'
+                          : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white hover:bg-slate-800 disabled:opacity-50'
+                      }`}
+                    >
+                      {lev}x
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {(configForm.leverage || 1) > 5 && (
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5 flex items-start space-x-2 text-[11px] text-amber-200">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div className="leading-normal">
+                    <span className="font-bold text-amber-300 block">⚡ แจ้งเตือนความเสี่ยง Leverage สูง ({configForm.leverage}x):</span>
+                    เลเวอเรจ {configForm.leverage}x จะขยายทั้งกำไรและขาดทุน {configForm.leverage} เท่า หากราคาขยับผิดทางเพียง -{(100 / (configForm.leverage || 1)).toFixed(1)}% พอร์ตจะถูก Auto-Liquidate (ขาดทุน 100% ของ Margin)
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Position Sizing & Equal Weight Money Management */}

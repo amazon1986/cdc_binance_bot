@@ -144,10 +144,11 @@ export const TradeHistoryTable: React.FC<TradeHistoryTableProps> = ({
               <thead>
                 <tr className="bg-slate-950 text-slate-400 border-b border-slate-800">
                   <th className="p-2.5">เหรียญ</th>
-                  <th className="p-2.5">ฝั่ง</th>
+                  <th className="p-2.5">ฝั่ง & Leverage</th>
                   <th className="p-2.5">ราคาเข้า (Entry)</th>
-                  <th className="p-2.5">ราคาปัจจุบัน (Realtime)</th>
-                  <th className="p-2.5">เงินลงทุน (USDT)</th>
+                  <th className="p-2.5">ราคาปัจจุบัน</th>
+                  <th className="p-2.5">ทุนประกัน (Margin)</th>
+                  <th className="p-2.5">ราคาล้างพอร์ต (Liq)</th>
                   <th className="p-2.5">กำไร/ขาดทุน Realtime</th>
                   <th className="p-2.5 text-right">การจัดการ</th>
                 </tr>
@@ -158,11 +159,13 @@ export const TradeHistoryTable: React.FC<TradeHistoryTableProps> = ({
                   const livePrice = ticker ? ticker.lastPrice : pos.entryPrice;
                   const pnlUsdt = pos.currentPnlUsdt ?? 0;
                   const pnlPercent = pos.currentPnlPercent ?? 0;
+                  const margin = pos.marginUsdt || pos.usdtInvested;
+                  const lev = pos.leverage || 1;
 
                   return (
                     <tr key={pos.symbol} className="hover:bg-slate-800/50">
                       <td className="p-2.5 font-bold text-white text-sm">{pos.symbol}</td>
-                      <td className="p-2.5">
+                      <td className="p-2.5 flex items-center gap-1.5">
                         <span
                           className={`px-2 py-0.5 rounded font-extrabold text-[11px] border ${
                             pos.side === 'SHORT'
@@ -172,10 +175,14 @@ export const TradeHistoryTable: React.FC<TradeHistoryTableProps> = ({
                         >
                           {pos.side}
                         </span>
+                        <span className="px-1.5 py-0.5 rounded font-mono text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                          {lev}x
+                        </span>
                       </td>
                       <td className="p-2.5 text-slate-300">{formatCryptoPrice(pos.entryPrice)}</td>
                       <td className="p-2.5 font-bold text-white">{formatCryptoPrice(livePrice > 0 ? livePrice : pos.entryPrice)}</td>
-                      <td className="p-2.5 text-slate-300">${pos.usdtInvested.toFixed(2)}</td>
+                      <td className="p-2.5 text-emerald-400 font-bold">${margin.toFixed(2)}</td>
+                      <td className="p-2.5 text-rose-400 font-bold">{pos.liquidationPrice ? formatCryptoPrice(pos.liquidationPrice) : '-'}</td>
                       <td className="p-2.5">
                         <div
                           className={`inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg font-extrabold border shadow-sm ${

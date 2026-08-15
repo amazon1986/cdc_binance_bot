@@ -71,6 +71,7 @@ const DEFAULT_SERVER_STATE: ServerState = {
     usePercentBalance: true,
     balancePercent: 20,
     positionSizingMode: 'EQUAL_WEIGHT',
+    leverage: 1,
     maxOpenPositions: 5,
     stopLossPercent: 5,
     takeProfitPercent: 15,
@@ -248,13 +249,18 @@ async function runServerBotCycle() {
       const existingPosIndex = serverState.paperAccount.activePositions.findIndex((p) => p.symbol === sym);
       if (existingPosIndex !== -1) {
         const pos = serverState.paperAccount.activePositions[existingPosIndex];
+        const posLev = pos.leverage || 1;
+        const margin = pos.marginUsdt || pos.usdtInvested;
+
         const pnlPercent = pos.side === 'SHORT'
-          ? ((pos.entryPrice - currentPrice) / pos.entryPrice) * 100
-          : ((currentPrice - pos.entryPrice) / pos.entryPrice) * 100;
-        const pnlUsdt = (pos.usdtInvested * pnlPercent) / 100;
+          ? ((pos.entryPrice - currentPrice) / pos.entryPrice) * 100 * posLev
+          : ((currentPrice - pos.entryPrice) / pos.entryPrice) * 100 * posLev;
+        const pnlUsdt = (margin * pnlPercent) / 100;
 
         let exitReason = '';
-        if (config.stopLossPercent > 0 && pnlPercent <= -config.stopLossPercent) {
+        if (pnlPercent <= -90 || (pos.liquidationPrice && (pos.side === 'LONG' ? currentPrice <= pos.liquidationPrice : currentPrice >= pos.liquidationPrice))) {
+          exitReason = '⚡ Auto Liquidation (Margin Call -90%)';
+        } else if (config.stopLossPercent > 0 && pnlPercent <= -config.stopLossPercent) {
           exitReason = `Stop Loss (-${config.stopLossPercent}%)`;
         } else if (config.takeProfitPercent > 0 && pnlPercent >= config.takeProfitPercent) {
           exitReason = `Take Profit (+${config.takeProfitPercent}%)`;
@@ -268,7 +274,7 @@ async function runServerBotCycle() {
         }
 
         if (exitReason) {
-          const returnUsdt = pos.usdtInvested + pnlUsdt;
+          const returnUsdt = Math.max(0, margin + pnlUsdt);
           serverState.paperAccount.usdtBalance += returnUsdt;
           serverState.paperAccount.activePositions.splice(existingPosIndex, 1);
           serverState.paperAccount.totalTrades += 1;
@@ -287,6 +293,7 @@ async function runServerBotCycle() {
             price: currentPrice,
             amount: pos.amount,
             usdtValue: returnUsdt,
+            leverage: posLev,
             pnlUsdt: Number(pnlUsdt.toFixed(2)),
             pnlPercent: Number(pnlPercent.toFixed(2)),
             reason: `[Cloud 24/7] ${exitReason}`,
@@ -299,11 +306,11 @@ async function runServerBotCycle() {
             serverState.tradeHistory = serverState.tradeHistory.slice(0, 500);
           }
 
-          addServerLog(`🛑 [SERVER 24/7 AUTO CLOSE ${pos.side}] ${pos.symbol} @ $${currentPrice} | PnL: ${pnlUsdt >= 0 ? '+' : ''}$${pnlUsdt.toFixed(2)} (${pnlPercent.toFixed(2)}%) | เหตุผล: ${exitReason}`);
+          addServerLog(`🛑 [SERVER 24/7 ${exitReason.includes('Liquidation') ? 'LIQUIDATE' : 'AUTO CLOSE'} ${pos.side} ${posLev}x] ${pos.symbol} @ $${currentPrice} | PnL: ${pnlUsdt >= 0 ? '+' : ''}$${pnlUsdt.toFixed(2)} (${pnlPercent.toFixed(2)}%) | เหตุผล: ${exitReason}`);
           saveServerState();
         } else {
-          pos.currentPnlUsdt = pnlUsdt;
-          pos.currentPnlPercent = pnlPercent;
+          pos.currentPnlUsdt = Number(pnlUsdt.toFixed(2));
+          pos.currentPnlPercent = Number(pnlPercent.toFixed(2));
         }
         continue;
       }
@@ -335,8 +342,14 @@ async function runServerBotCycle() {
 
       if (targetSide) {
         const tradeUsdt = calculateOrderSize(config, serverState.paperAccount);
+        const lev = Math.min(Math.max(1, config.leverage || 1), 10);
         if (tradeUsdt >= 10 && serverState.paperAccount.usdtBalance >= tradeUsdt) {
-          const coinAmount = tradeUsdt / currentPrice;
+          const notionalValue = tradeUsdt * lev;
+          const coinAmount = notionalValue / currentPrice;
+          const liqPrice = targetSide === 'LONG'
+            ? currentPrice * (1 - 0.9 / lev)
+            : currentPrice * (1 + 0.9 / lev);
+
           serverState.paperAccount.usdtBalance -= tradeUsdt;
 
           const newPos: PaperPosition = {
@@ -345,6 +358,9 @@ async function runServerBotCycle() {
             entryPrice: currentPrice,
             amount: coinAmount,
             usdtInvested: tradeUsdt,
+            marginUsdt: tradeUsdt,
+            leverage: lev,
+            liquidationPrice: Number(liqPrice.toFixed(6)),
             entryTime: Date.now(),
             currentPnlUsdt: 0,
             currentPnlPercent: 0,
@@ -359,14 +375,15 @@ async function runServerBotCycle() {
             side: targetSide === 'LONG' ? 'BUY' : 'SELL',
             price: currentPrice,
             amount: coinAmount,
-            usdtValue: tradeUsdt,
-            reason: `[Cloud 24/7 Entry] CDC ${latestCandle.colorNameTh} (${targetSide})`,
+            usdtValue: notionalValue,
+            leverage: lev,
+            reason: `[Cloud 24/7 Entry ${lev}x] CDC ${latestCandle.colorNameTh} (${targetSide})`,
             timestamp: Date.now(),
             mode: config.mode,
           };
 
           serverState.tradeHistory.unshift(trade);
-          addServerLog(`🚀 [SERVER 24/7 OPEN ${targetSide}] ${sym} @ $${currentPrice} | มูลค่า $${tradeUsdt.toFixed(2)} USDT | สัญญาณ ${latestCandle.colorNameTh}`);
+          addServerLog(`🚀 [SERVER 24/7 OPEN ${targetSide} ${lev}x] ${sym} @ $${currentPrice} | ทุน $${tradeUsdt.toFixed(2)} USDT (มูลค่าสัญญา $${notionalValue.toFixed(2)}) | สัญญาณ ${latestCandle.colorNameTh}`);
           saveServerState();
         }
       }
@@ -412,12 +429,15 @@ app.get('/api/bot/state', (req, res) => {
 app.post('/api/bot/config', (req, res) => {
   try {
     const updated = req.body as Partial<BotConfig>;
+    if (updated.leverage !== undefined) {
+      updated.leverage = Math.min(Math.max(1, parseInt(String(updated.leverage), 10) || 1), 10);
+    }
     serverState.botConfig = {
       ...serverState.botConfig,
       ...updated,
     };
     saveServerState();
-    addServerLog(`⚙️ อัปเดตการตั้งค่าบอท: ${serverState.botConfig.symbol} | TF: ${serverState.botConfig.timeframe} | สถานะ: ${serverState.botConfig.isActive ? 'เปิดทำงาน 🟢' : 'หยุด 🔴'}`);
+    addServerLog(`⚙️ อัปเดตการตั้งค่าบอท: ${serverState.botConfig.symbol} | Leverage: ${serverState.botConfig.leverage || 1}x | TF: ${serverState.botConfig.timeframe} | สถานะ: ${serverState.botConfig.isActive ? 'เปิดทำงาน 🟢' : 'หยุด 🔴'}`);
     return res.json({ success: true, botConfig: serverState.botConfig });
   } catch (err: any) {
     return res.status(500).json({ error: sanitizeErrorMessage(err) });
@@ -446,7 +466,13 @@ app.post('/api/bot/manual-order', (req, res) => {
       return res.status(400).json({ error: 'ยอดเงินคงเหลือไม่เพียงพอ' });
     }
 
-    const coinAmount = amountUsdt / currentPrice;
+    const lev = Math.min(Math.max(1, serverState.botConfig.leverage || 1), 10);
+    const notionalValue = amountUsdt * lev;
+    const coinAmount = notionalValue / currentPrice;
+    const liqPrice = side === 'LONG'
+      ? currentPrice * (1 - 0.9 / lev)
+      : currentPrice * (1 + 0.9 / lev);
+
     serverState.paperAccount.usdtBalance -= amountUsdt;
 
     const newPos: PaperPosition = {
@@ -455,6 +481,9 @@ app.post('/api/bot/manual-order', (req, res) => {
       entryPrice: currentPrice,
       amount: coinAmount,
       usdtInvested: amountUsdt,
+      marginUsdt: amountUsdt,
+      leverage: lev,
+      liquidationPrice: Number(liqPrice.toFixed(6)),
       entryTime: Date.now(),
       currentPnlUsdt: 0,
       currentPnlPercent: 0,
@@ -469,14 +498,15 @@ app.post('/api/bot/manual-order', (req, res) => {
       side: side === 'LONG' ? 'BUY' : 'SELL',
       price: currentPrice,
       amount: coinAmount,
-      usdtValue: amountUsdt,
-      reason: `[Manual Order] เปิด ${side} ด้วยตนเอง`,
+      usdtValue: notionalValue,
+      leverage: lev,
+      reason: `[Manual Order ${lev}x] เปิด ${side} ด้วยตนเอง`,
       timestamp: Date.now(),
       mode: serverState.botConfig.mode,
     };
 
     serverState.tradeHistory.unshift(trade);
-    addServerLog(`✋ [MANUAL ORDER] เปิด ${side} ${symbol} @ $${currentPrice} มูลค่า $${amountUsdt} USDT`);
+    addServerLog(`✋ [MANUAL ORDER ${lev}x] เปิด ${side} ${symbol} @ $${currentPrice} | ทุน $${amountUsdt} USDT (มูลค่าสัญญา $${notionalValue.toFixed(2)})`);
     saveServerState();
     return res.json({ success: true });
   } catch (err: any) {
@@ -508,11 +538,13 @@ app.post('/api/bot/close-position', async (req, res) => {
       }
     }
 
+    const posLev = pos.leverage || 1;
+    const margin = pos.marginUsdt || pos.usdtInvested;
     const pnlPercent = pos.side === 'SHORT'
-      ? ((pos.entryPrice - currentPrice) / pos.entryPrice) * 100
-      : ((currentPrice - pos.entryPrice) / pos.entryPrice) * 100;
-    const pnlUsdt = (pos.usdtInvested * pnlPercent) / 100;
-    const returnUsdt = Math.max(0, pos.usdtInvested + pnlUsdt);
+      ? ((pos.entryPrice - currentPrice) / pos.entryPrice) * 100 * posLev
+      : ((currentPrice - pos.entryPrice) / pos.entryPrice) * 100 * posLev;
+    const pnlUsdt = (margin * pnlPercent) / 100;
+    const returnUsdt = Math.max(0, margin + pnlUsdt);
 
     serverState.paperAccount.usdtBalance += returnUsdt;
     serverState.paperAccount.activePositions.splice(idx, 1);
@@ -529,6 +561,7 @@ app.post('/api/bot/close-position', async (req, res) => {
       price: currentPrice,
       amount: pos.amount,
       usdtValue: returnUsdt,
+      leverage: posLev,
       pnlUsdt: Number(pnlUsdt.toFixed(2)),
       pnlPercent: Number(pnlPercent.toFixed(2)),
       reason: `[Manual Close] ${reason}`,
@@ -537,7 +570,7 @@ app.post('/api/bot/close-position', async (req, res) => {
     };
 
     serverState.tradeHistory.unshift(trade);
-    addServerLog(`✋ [MANUAL CLOSE] ปิดสัญญา ${pos.symbol} @ $${currentPrice} | PnL: ${pnlUsdt >= 0 ? '+' : ''}$${pnlUsdt.toFixed(2)} (${pnlPercent.toFixed(2)}%)`);
+    addServerLog(`✋ [MANUAL CLOSE ${posLev}x] ปิดสัญญา ${pos.symbol} @ $${currentPrice} | PnL: ${pnlUsdt >= 0 ? '+' : ''}$${pnlUsdt.toFixed(2)} (${pnlPercent.toFixed(2)}%)`);
     saveServerState();
     return res.json({ success: true });
   } catch (err: any) {

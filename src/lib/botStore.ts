@@ -21,6 +21,7 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
   usePercentBalance: true,
   balancePercent: 20,
   positionSizingMode: 'EQUAL_WEIGHT', // 🎯 ถัวเฉลี่ยเท่ากันทุกเหรียญ (Equal Weight Sizing)
+  leverage: 1, // ⚡ Default 1x (1x to 10x)
   maxOpenPositions: 5, // 🎯 ถือครองสูงสุด 5 ไม้ (แบ่งเท่ากันไม้ละ 20% ของพอร์ตรวม)
   stopLossPercent: 5,
   takeProfitPercent: 15,
@@ -51,9 +52,11 @@ export function getStoredBotConfig(): BotConfig {
     const raw = localStorage.getItem(STORAGE_KEYS.BOT_CONFIG);
     if (!raw) return DEFAULT_BOT_CONFIG;
     const parsed = JSON.parse(raw);
+    const lev = Math.min(Math.max(1, parseInt(parsed.leverage || 1, 10)), 10);
     return {
       ...DEFAULT_BOT_CONFIG,
       ...parsed,
+      leverage: isNaN(lev) ? 1 : lev,
       timeframe: parsed.timeframe || '1d',
       maxOpenPositions: parsed.maxOpenPositions && parsed.maxOpenPositions > 0 ? parsed.maxOpenPositions : 5,
       positionSizingMode: parsed.positionSizingMode || 'EQUAL_WEIGHT',
