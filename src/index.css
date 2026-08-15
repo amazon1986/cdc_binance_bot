@@ -1,0 +1,47 @@
+@import "tailwindcss";
+
+@layer base {
+  html, body {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: auto;
+    touch-action: pan-y;
+    scroll-behavior: smooth;
+  }
+}
+
+/* Smooth mobile momentum scrolling for horizontal containers */
+.scrollbar-none, .overflow-x-auto {
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE and Edge */
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none; /* Chrome, Safari, Opera */
+}
+
+/* Prevent scroll trapping in nested scrollable panels on mobile */
+.overflow-y-auto {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+
+@keyframes marquee {
+  0% {
+    transform: translateX(0%);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee {
+  display: flex;
+  width: max-content;
+  animation: marquee 90s linear infinite;
+}
+
+.animate-marquee:hover {
+  animation-play-state: paused;
+}
