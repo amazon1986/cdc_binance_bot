@@ -354,8 +354,30 @@ export default function App() {
   // Manual Close Handler
   const handleManualSell = async (symbolToSell?: string) => {
     const sym = symbolToSell || botConfig.symbol;
-    const price = currentPriceInfo.price;
-    if (!price || price === 0) return;
+
+    let price = 0;
+    if (sym === currentPriceInfo.symbol && currentPriceInfo.price > 0) {
+      price = currentPriceInfo.price;
+    } else {
+      const ticker = allTickers.find((t) => t.symbol === sym);
+      if (ticker && ticker.lastPrice > 0) {
+        price = ticker.lastPrice;
+      } else {
+        try {
+          const tData = await fetchBinanceTicker24h(sym);
+          if (tData.length > 0 && tData[0].lastPrice > 0) {
+            price = tData[0].lastPrice;
+          }
+        } catch (e) {
+          console.error(`Failed to fetch price for ${sym}:`, e);
+        }
+      }
+    }
+
+    if (!price || price === 0) {
+      showToast(`ไม่สามารถดึงราคาปัจจุบันของ ${sym} ได้`, 'sell');
+      return;
+    }
 
     const res = await closePositionOnServer({
       symbol: sym,

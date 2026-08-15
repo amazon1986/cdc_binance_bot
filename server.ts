@@ -485,20 +485,34 @@ app.post('/api/bot/manual-order', (req, res) => {
 });
 
 // 5. Manual Close Position
-app.post('/api/bot/close-position', (req, res) => {
+app.post('/api/bot/close-position', async (req, res) => {
   try {
-    const { symbol, currentPrice, reason = 'Manual Close' } = req.body;
+    let { symbol, currentPrice, reason = 'Manual Close' } = req.body;
     const idx = serverState.paperAccount.activePositions.findIndex((p) => p.symbol === symbol);
     if (idx === -1) {
       return res.status(404).json({ error: 'ไม่พบตำแหน่งที่เปิดอยู่' });
     }
 
     const pos = serverState.paperAccount.activePositions[idx];
+
+    // Verification: If currentPrice is missing, zero, or has wild ratio error (>50x difference from entryPrice), fetch exact market price for this symbol
+    const priceRatio = (currentPrice && pos.entryPrice) ? (currentPrice / pos.entryPrice) : 0;
+    if (!currentPrice || currentPrice <= 0 || priceRatio > 50 || priceRatio < 0.02) {
+      try {
+        const liveKlines = await fetchKlinesDirect(pos.symbol, '1m', 1);
+        if (liveKlines.length > 0 && liveKlines[0].close > 0) {
+          currentPrice = liveKlines[0].close;
+        }
+      } catch (err) {
+        console.warn(`Failed to verify close price for ${pos.symbol}:`, err);
+      }
+    }
+
     const pnlPercent = pos.side === 'SHORT'
       ? ((pos.entryPrice - currentPrice) / pos.entryPrice) * 100
       : ((currentPrice - pos.entryPrice) / pos.entryPrice) * 100;
     const pnlUsdt = (pos.usdtInvested * pnlPercent) / 100;
-    const returnUsdt = pos.usdtInvested + pnlUsdt;
+    const returnUsdt = Math.max(0, pos.usdtInvested + pnlUsdt);
 
     serverState.paperAccount.usdtBalance += returnUsdt;
     serverState.paperAccount.activePositions.splice(idx, 1);
