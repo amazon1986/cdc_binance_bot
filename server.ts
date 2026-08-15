@@ -8,24 +8,19 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
 
 // ==================== SECURITY MIDDLEWARE ====================
 
 // 1. Helmet — HTTP Security Headers (XSS, clickjacking, MIME sniffing protection)
 app.use(helmet({
-  contentSecurityPolicy: process.env.NODE_ENV === 'production' ? undefined : false, // Disable CSP in dev for Vite HMR
+  contentSecurityPolicy: process.env.NODE_ENV === 'production' ? false : false, // Allow inline styles & scripts on Render SPA
   crossOriginEmbedderPolicy: false, // Allow loading external resources (Binance API)
 }));
 
-// 2. CORS — Allow only localhost origins
+// 2. CORS — Allow localhost and production deployment URLs
 app.use(cors({
-  origin: [
-    'http://localhost:3000',
-    'http://127.0.0.1:3000',
-    'http://localhost:5173', // Vite dev server
-    'http://127.0.0.1:5173',
-  ],
+  origin: true, // Allow same-origin and cloud hosting domains (Render, etc.)
   methods: ['GET', 'POST'],
   allowedHeaders: ['Content-Type'],
   credentials: false,
@@ -443,8 +438,8 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '127.0.0.1', () => {
-    console.log(`CDC Action Zone Binance Trading Bot Server running on http://127.0.0.1:${PORT}`);
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`CDC Action Zone Binance Trading Bot Server running on port ${PORT}`);
   });
 }
 
