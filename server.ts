@@ -7,7 +7,7 @@ import rateLimit from 'express-rate-limit';
 import cors from 'cors';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
-import { BotConfig, PaperAccount, PaperPosition, ExecutedTrade, KlineData, Timeframe } from './src/types';
+import { BotConfig, PaperAccount, PaperPosition, ExecutedTrade, KlineData, Timeframe, TelegramConfig } from './src/types';
 import { calculateCDCActionZone, getCrossoverInfo } from './src/lib/cdcIndicator';
 import { POPULAR_PAIRS } from './src/lib/binanceApi';
 
@@ -57,6 +57,7 @@ interface ServerState {
   paperAccount: PaperAccount;
   tradeHistory: ExecutedTrade[];
   botLogs: string[];
+  telegramConfig: TelegramConfig;
   liveApiKeys?: {
     apiKey: string;
     apiSecret: string;
@@ -103,6 +104,15 @@ const DEFAULT_SERVER_STATE: ServerState = {
   botLogs: [
     `[${new Date().toLocaleTimeString('th-TH')}] 🚀 CDC Action Zone 24/7 Cloud Server initialized and ready.`,
   ],
+  telegramConfig: {
+    botToken: '',
+    chatId: '',
+    enabled: false,
+    notifyOnBuy: true,
+    notifyOnSell: true,
+    notifyOnSignal: true,
+    notifyOnBotStatus: true,
+  },
 };
 
 let serverState: ServerState = { ...DEFAULT_SERVER_STATE };
@@ -122,6 +132,7 @@ function loadServerState() {
         paperAccount: { ...DEFAULT_SERVER_STATE.paperAccount, ...(parsed.paperAccount || {}) },
         tradeHistory: Array.isArray(parsed.tradeHistory) ? parsed.tradeHistory : [],
         botLogs: Array.isArray(parsed.botLogs) ? parsed.botLogs : [],
+        telegramConfig: { ...DEFAULT_SERVER_STATE.telegramConfig, ...(parsed.telegramConfig || {}) },
       };
       console.log('✅ Loaded persistent bot state from disk.');
     }
@@ -130,6 +141,7 @@ function loadServerState() {
     serverState = { ...DEFAULT_SERVER_STATE };
   }
 }
+
 
 function saveServerState() {
   try {
@@ -224,6 +236,50 @@ async function fetchKlinesDirect(symbol: string, interval: string, limit = 300):
   }
 }
 
+// ==================== TELEGRAM NOTIFICATION ENGINE ====================
+
+async function sendTelegramNotification(
+  text: string,
+  eventType?: 'BUY' | 'SELL' | 'SIGNAL' | 'STATUS'
+): Promise<boolean> {
+  const config = serverState.telegramConfig;
+  if (!config || !config.enabled || !config.botToken || !config.chatId) {
+    return false;
+  }
+
+  if (eventType === 'BUY' && !config.notifyOnBuy) return false;
+  if (eventType === 'SELL' && !config.notifyOnSell) return false;
+  if (eventType === 'SIGNAL' && !config.notifyOnSignal) return false;
+  if (eventType === 'STATUS' && !config.notifyOnBotStatus) return false;
+
+  try {
+    const url = `https://api.telegram.org/bot${config.botToken.trim()}/sendMessage`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: config.chatId.trim(),
+        text,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+      }),
+    });
+
+    const data = await res.json();
+    if (!data.ok) {
+      console.warn('⚠️ Telegram API send warning:', data.description);
+      return false;
+    }
+    return true;
+  } catch (err: any) {
+    console.error('❌ Error sending Telegram notification:', err.message);
+    return false;
+  }
+}
+
+// Memory cache for signal alerts to avoid spamming the same candle
+const alertedSignals = new Map<string, number>();
+
 // ==================== SERVER-SIDE 24/7 AUTOMATED CYCLE ====================
 
 let isCycleRunning = false;
@@ -314,6 +370,21 @@ async function runServerBotCycle() {
 
           addServerLog(`🛑 [SERVER 24/7 ${exitReason.includes('Liquidation') ? 'LIQUIDATE' : 'AUTO CLOSE'} ${pos.side} ${posLev}x] ${pos.symbol} @ $${currentPrice} | PnL: ${pnlUsdt >= 0 ? '+' : ''}$${pnlUsdt.toFixed(2)} (${pnlPercent.toFixed(2)}%) | เหตุผล: ${exitReason}`);
           saveServerState();
+
+          // Telegram Alert for Exit
+          const isWin = pnlUsdt >= 0;
+          const timeStr = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
+          const tgExitMsg = `${isWin ? '🎉' : '🛑'} <b>[CDC Action Zone] ${isWin ? 'ปิดทำกำไรสำเร็จ (Take Profit)' : 'ปิดสัญญา / ตัดขาดทุน (Exit)'}</b>
+━━━━━━━━━━━━━━━━━━━━
+🪙 <b>เหรียญ:</b> #${pos.symbol}
+📊 <b>สถานะ:</b> ${pos.side} ${posLev}x (${config.timeframe})
+💰 <b>ราคาปิด:</b> $${currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 8 })}
+${isWin ? '📈' : '📉'} <b>ผลตอบแทน (PnL):</b> ${isWin ? '+' : ''}$${pnlUsdt.toFixed(2)} USDT (${isWin ? '+' : ''}${pnlPercent.toFixed(2)}%)
+💵 <b>เงินทุนที่ได้รับคืน:</b> $${returnUsdt.toFixed(2)} USDT
+💼 <b>ยอดพอร์ตคงเหลือ:</b> $${serverState.paperAccount.usdtBalance.toFixed(2)} USDT
+📝 <b>เหตุผล:</b> ${exitReason}
+🕒 <b>เวลา:</b> ${timeStr}`;
+          sendTelegramNotification(tgExitMsg, 'SELL');
         } else {
           pos.currentPnlUsdt = Number(pnlUsdt.toFixed(2));
           pos.currentPnlPercent = Number(pnlPercent.toFixed(2));
@@ -338,6 +409,27 @@ async function runServerBotCycle() {
         (config.sellOnSignal.includes('RED') && latestCandle.zone === 'RED') ||
         (config.sellOnSignal.includes('YELLOW') && latestCandle.zone === 'YELLOW')
       );
+
+      // Notify Fresh CDC Signal if not already alerted for this candle
+      const signalKey = `${sym}_${config.timeframe}_${latestCandle.time}`;
+      if ((crossInfo.isFreshGoldenCross || crossInfo.isFreshDeadCross) && !alertedSignals.has(signalKey)) {
+        alertedSignals.set(signalKey, Date.now());
+        // Clean up cache
+        if (alertedSignals.size > 200) {
+          const firstKey = alertedSignals.keys().next().value;
+          if (firstKey) alertedSignals.delete(firstKey);
+        }
+
+        const timeStr = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
+        const signalMsg = `📡 <b>[CDC Action Zone] ตรวจพบสัญญาณใหม่!</b>
+━━━━━━━━━━━━━━━━━━━━
+🪙 <b>เหรียญ:</b> #${sym} (${config.timeframe})
+💡 <b>สัญญาณ:</b> ${latestCandle.colorNameTh} (${latestCandle.zone})
+🎯 <b>จุดตัด:</b> ${crossInfo.isFreshGoldenCross ? '✨ Golden Cross (EMA 12 ตัดขึ้น EMA 26)' : '⚡ Dead Cross (EMA 12 ตัดลง EMA 26)'}
+🏷 <b>ราคาปัจจุบัน:</b> $${currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 8 })}
+🕒 <b>เวลา:</b> ${timeStr}`;
+        sendTelegramNotification(signalMsg, 'SIGNAL');
+      }
 
       let targetSide: 'LONG' | 'SHORT' | null = null;
       if ((dirMode === 'LONG_ONLY' || dirMode === 'BOTH') && isBuySignal) {
@@ -391,11 +483,28 @@ async function runServerBotCycle() {
           serverState.tradeHistory.unshift(trade);
           addServerLog(`🚀 [SERVER 24/7 OPEN ${targetSide} ${lev}x] ${sym} @ $${currentPrice} | ทุน $${tradeUsdt.toFixed(2)} USDT (มูลค่าสัญญา $${notionalValue.toFixed(2)}) | สัญญาณ ${latestCandle.colorNameTh}`);
           saveServerState();
+
+          // Telegram Alert for Open Order
+          const timeStr = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
+          const tgOpenMsg = `🟢 <b>[CDC Action Zone Bot] สั่งเปิดออเดอร์ใหม่!</b>
+━━━━━━━━━━━━━━━━━━━━
+🪙 <b>เหรียญ:</b> #${sym}
+📊 <b>สัญญาณ:</b> CDC ${latestCandle.colorNameTh} (${targetSide} ${lev}x)
+⏱ <b>ไทม์เฟรม:</b> ${config.timeframe}
+💰 <b>ราคาเข้า:</b> $${currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 8 })}
+⚡ <b>Leverage:</b> ${lev}x (${config.marketType || 'SPOT'})
+💵 <b>เงินทุน:</b> $${tradeUsdt.toFixed(2)} USDT (มูลค่า $${notionalValue.toFixed(2)})
+🎯 <b>Take Profit:</b> +${config.takeProfitPercent}%
+🛡 <b>Stop Loss:</b> -${config.stopLossPercent}%
+💼 <b>ยอดพอร์ตคงเหลือ:</b> $${serverState.paperAccount.usdtBalance.toFixed(2)} USDT
+🕒 <b>เวลา:</b> ${timeStr}`;
+          sendTelegramNotification(tgOpenMsg, 'BUY');
         }
       }
     }
   } catch (err) {
     console.error('Error in server bot cycle:', err);
+
   } finally {
     isCycleRunning = false;
   }
@@ -426,6 +535,7 @@ app.get('/api/bot/state', (req, res) => {
     paperAccount: serverState.paperAccount,
     tradeHistory: serverState.tradeHistory,
     botLogs: serverState.botLogs,
+    telegramConfig: serverState.telegramConfig,
     serverTime: Date.now(),
     isServerRunning: true,
   });
@@ -457,6 +567,19 @@ app.post('/api/bot/toggle', (req, res) => {
   serverState.botConfig.isActive = next;
   saveServerState();
   addServerLog(next ? '🟢 [CLOUD 24/7 BOT ACTIVATED] เริ่มระบบเทรดอัตโนมัติบนคลาวด์' : '🔴 [CLOUD BOT STOPPED] หยุดระบบเทรดอัตโนมัติ');
+
+  // Telegram Alert for Bot Toggle
+  const timeStr = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
+  const statusMsg = `${next ? '🚀' : '⏸'} <b>[CDC Bot] ${next ? 'เปิดใช้งานระบบเทรดอัตโนมัติ 24/7' : 'หยุดการทำงานของบอทชั่วคราว'}</b>
+━━━━━━━━━━━━━━━━━━━━
+📊 <b>สถานะ:</b> ${next ? 'กำลังทำงาน 🟢 (ACTIVE)' : 'หยุดทำงาน 🔴 (PAUSED)'}
+🪙 <b>เหรียญหลัก:</b> #${serverState.botConfig.symbol}
+⏱ <b>ไทม์เฟรม:</b> ${serverState.botConfig.timeframe}
+⚡ <b>Leverage:</b> ${serverState.botConfig.leverage || 1}x (${serverState.botConfig.marketType || 'SPOT'})
+💼 <b>โหมด:</b> ${serverState.botConfig.mode === 'PAPER' ? 'พอร์ตจำลอง (Paper Trading)' : 'พอร์ตจริง (Binance Live)'}
+🕒 <b>เวลา:</b> ${timeStr}`;
+  sendTelegramNotification(statusMsg, 'STATUS');
+
   return res.json({ success: true, isActive: next });
 });
 
@@ -514,6 +637,19 @@ app.post('/api/bot/manual-order', (req, res) => {
     serverState.tradeHistory.unshift(trade);
     addServerLog(`✋ [MANUAL ORDER ${lev}x] เปิด ${side} ${symbol} @ $${currentPrice} | ทุน $${amountUsdt} USDT (มูลค่าสัญญา $${notionalValue.toFixed(2)})`);
     saveServerState();
+
+    // Telegram Alert for Manual Order
+    const timeStr = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
+    const tgManualMsg = `✋ <b>[CDC Bot] เปิดออเดอร์ด้วยตนเอง (Manual Order)</b>
+━━━━━━━━━━━━━━━━━━━━
+🪙 <b>เหรียญ:</b> #${symbol}
+📊 <b>คำสั่ง:</b> ${side} ${lev}x
+💰 <b>ราคา:</b> $${currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 8 })}
+💵 <b>เงินทุน:</b> $${amountUsdt.toFixed(2)} USDT (มูลค่า $${notionalValue.toFixed(2)})
+💼 <b>ยอดพอร์ตคงเหลือ:</b> $${serverState.paperAccount.usdtBalance.toFixed(2)} USDT
+🕒 <b>เวลา:</b> ${timeStr}`;
+    sendTelegramNotification(tgManualMsg, 'BUY');
+
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: sanitizeErrorMessage(err) });
@@ -578,6 +714,21 @@ app.post('/api/bot/close-position', async (req, res) => {
     serverState.tradeHistory.unshift(trade);
     addServerLog(`✋ [MANUAL CLOSE ${posLev}x] ปิดสัญญา ${pos.symbol} @ $${currentPrice} | PnL: ${pnlUsdt >= 0 ? '+' : ''}$${pnlUsdt.toFixed(2)} (${pnlPercent.toFixed(2)}%)`);
     saveServerState();
+
+    // Telegram Alert for Manual Close
+    const isWin = pnlUsdt >= 0;
+    const timeStr = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
+    const tgManualCloseMsg = `${isWin ? '🎉' : '🛑'} <b>[CDC Bot] ปิดสัญญาด้วยตนเอง (Manual Close)</b>
+━━━━━━━━━━━━━━━━━━━━
+🪙 <b>เหรียญ:</b> #${pos.symbol}
+📊 <b>สถานะ:</b> ${pos.side} ${posLev}x
+💰 <b>ราคาปิด:</b> $${currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 8 })}
+${isWin ? '📈' : '📉'} <b>PnL:</b> ${isWin ? '+' : ''}$${pnlUsdt.toFixed(2)} USDT (${isWin ? '+' : ''}${pnlPercent.toFixed(2)}%)
+💵 <b>เงินทุนที่ได้รับคืน:</b> $${returnUsdt.toFixed(2)} USDT
+💼 <b>ยอดพอร์ตคงเหลือ:</b> $${serverState.paperAccount.usdtBalance.toFixed(2)} USDT
+🕒 <b>เวลา:</b> ${timeStr}`;
+    sendTelegramNotification(tgManualCloseMsg, 'SELL');
+
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: sanitizeErrorMessage(err) });
@@ -608,6 +759,77 @@ app.post('/api/bot/reset-paper', (req, res) => {
   return res.json({ success: true });
 });
 
+// ==================== TELEGRAM CONFIG & TEST ENDPOINTS ====================
+
+// Get Telegram configuration
+app.get('/api/telegram/config', (req, res) => {
+  return res.json(serverState.telegramConfig);
+});
+
+// Update Telegram configuration
+app.post('/api/telegram/config', (req, res) => {
+  try {
+    const updated = req.body as Partial<TelegramConfig>;
+    serverState.telegramConfig = {
+      ...serverState.telegramConfig,
+      ...updated,
+    };
+    saveServerState();
+    addServerLog(`📱 อัปเดตการตั้งค่า Telegram Bot Notification (${serverState.telegramConfig.enabled ? 'เปิดใช้งาน 🟢' : 'ปิดใช้งาน 🔴'})`);
+    return res.json({ success: true, telegramConfig: serverState.telegramConfig });
+  } catch (err: any) {
+    return res.status(500).json({ error: sanitizeErrorMessage(err) });
+  }
+});
+
+// Test Telegram notification message
+app.post('/api/telegram/test', async (req, res) => {
+  try {
+    const { botToken, chatId } = req.body;
+    const token = (botToken || serverState.telegramConfig.botToken || '').trim();
+    const chat = (chatId || serverState.telegramConfig.chatId || '').trim();
+
+    if (!token || !chat) {
+      return res.status(400).json({ error: 'กรุณาระบุ Telegram Bot Token และ Chat ID' });
+    }
+
+    const timeStr = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
+    const testMsg = `🚀 <b>[CDC Action Zone Bot] ทดสอบการเชื่อมต่อ Telegram สำเร็จ!</b>
+━━━━━━━━━━━━━━━━━━━━
+✅ <b>สถานะ:</b> ระบบเชื่อมต่อกับ Telegram เรียบร้อยแล้ว
+🤖 <b>บอทเทรด:</b> CDC Action Zone V2 (Binance)
+📈 <b>กลยุทธ์:</b> สูตรลุงโฉลก (EMA 12/26 Action Zone)
+⏱ <b>เซิร์ฟเวอร์:</b> Cloud Bot 24/7 พร้อมส่งการแจ้งเตือนทันที
+🕒 <b>เวลาทดสอบ:</b> ${timeStr}
+
+<i>ขอให้คุณประสบความสำเร็จและมีกำไรจากการลงทุนอย่างมีวินัยครับ! 🎯</i>`;
+
+    const url = `https://api.telegram.org/bot${token}/sendMessage`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chat,
+        text: testMsg,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true,
+      }),
+    });
+
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      return res.status(400).json({
+        error: data.description || 'ไม่สามารถส่งข้อความไปยัง Telegram ได้ กรุณาตรวจสอบ Bot Token และ Chat ID (และกด Start กับบอทใน Telegram ก่อน)',
+      });
+    }
+
+    addServerLog(`📱 ทดสอบส่งข้อความแจ้งเตือน Telegram ไปยัง Chat ID: ${chat} สำเร็จ 🟢`);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: sanitizeErrorMessage(err) });
+  }
+});
+
 // 8. Health check & uptime
 app.get('/api/health', (req, res) => {
   return res.json({
@@ -617,6 +839,7 @@ app.get('/api/health', (req, res) => {
     time: new Date().toISOString(),
   });
 });
+
 
 // ==================== BINANCE PROXY ENDPOINTS ====================
 

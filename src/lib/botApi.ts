@@ -1,4 +1,4 @@
-import { BotConfig, PaperAccount, ExecutedTrade } from '../types';
+import { BotConfig, PaperAccount, ExecutedTrade, TelegramConfig, TelegramTestResponse } from '../types';
 
 export interface BotServerState {
   botConfig: BotConfig;
@@ -7,7 +7,9 @@ export interface BotServerState {
   botLogs: string[];
   serverTime: number;
   isServerRunning: boolean;
+  telegramConfig?: TelegramConfig;
 }
+
 
 /**
  * Fetches the central bot state from the server.
@@ -143,3 +145,56 @@ export async function saveBinanceKeysToServer(keys: {
     return false;
   }
 }
+
+/**
+ * Fetches Telegram bot configuration from server.
+ */
+export async function fetchTelegramConfig(): Promise<TelegramConfig | null> {
+  try {
+    const res = await fetch('/api/telegram/config');
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Saves Telegram configuration to server.
+ */
+export async function saveTelegramConfigToServer(config: TelegramConfig): Promise<boolean> {
+  try {
+    const res = await fetch('/api/telegram/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Sends a test message via Telegram Bot to verify token and chat ID.
+ */
+export async function testTelegramNotification(config: {
+  botToken: string;
+  chatId: string;
+}): Promise<TelegramTestResponse> {
+  try {
+    const res = await fetch('/api/telegram/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      return { success: false, error: data.error || 'Failed to send test message' };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Network error while testing Telegram notification' };
+  }
+}
+

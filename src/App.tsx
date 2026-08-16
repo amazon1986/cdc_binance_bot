@@ -8,6 +8,7 @@ import {
   BinanceApiKeys,
   PaperPosition,
   BinanceTicker24h,
+  TelegramConfig,
 } from './types';
 import {
   getStoredBotConfig,
@@ -22,6 +23,8 @@ import {
   getStoredLogs,
   addBotLog,
   getStoredSymbols,
+  getStoredTelegramConfig,
+  saveTelegramConfig,
   DEFAULT_PAPER_ACCOUNT,
 } from './lib/botStore';
 import {
@@ -33,6 +36,8 @@ import {
   clearBotServerLogs,
   resetBotServerPaperAccount,
   saveBinanceKeysToServer,
+  fetchTelegramConfig,
+  saveTelegramConfigToServer,
 } from './lib/botApi';
 import {
   fetchBinanceKlines,
@@ -52,9 +57,11 @@ import { BacktestingView } from './components/BacktestingView';
 import { MarketScanner } from './components/MarketScanner';
 import { AiAnalystPanel } from './components/AiAnalystPanel';
 import { BinanceSettingsModal } from './components/BinanceSettingsModal';
+import { TelegramSettingsModal } from './components/TelegramSettingsModal';
 import { TradeHistoryTable } from './components/TradeHistoryTable';
 import { TradingStats } from './components/TradingStats';
 import { CoffeeDonation } from './components/CoffeeDonation';
+
 
 /**
  * Calculates equal-weight / fixed / percentage position size based on Total Portfolio Equity.
@@ -83,12 +90,14 @@ function calculateOrderSize(config: BotConfig, account: PaperAccount): number {
 export default function App() {
   const [activeTab, setActiveTab] = useState<'chart' | 'backtest' | 'scanner' | 'ai' | 'history' | 'stats' | 'coffee'>('chart');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isTelegramModalOpen, setIsTelegramModalOpen] = useState(false);
 
   // Core Central State (Synchronized with Server)
   const [botConfig, setBotConfig] = useState<BotConfig>(getStoredBotConfig);
   const [chartTimeframe, setChartTimeframe] = useState<Timeframe>(() => getStoredBotConfig().timeframe || '1d');
   const [paperAccount, setPaperAccount] = useState<PaperAccount>(getStoredPaperAccount);
   const [binanceKeys, setBinanceKeys] = useState<BinanceApiKeys>(getStoredBinanceKeys);
+  const [telegramConfig, setTelegramConfig] = useState<TelegramConfig>(getStoredTelegramConfig);
   const [tradeHistory, setTradeHistory] = useState<ExecutedTrade[]>(getStoredTradeHistory);
   const [botLogs, setBotLogs] = useState<string[]>(getStoredLogs);
 
@@ -182,6 +191,9 @@ export default function App() {
           setPaperAccount(serverData.paperAccount);
           setTradeHistory(serverData.tradeHistory);
           setBotLogs(serverData.botLogs);
+          if (serverData.telegramConfig) {
+            setTelegramConfig((prev) => ({ ...prev, ...serverData.telegramConfig }));
+          }
         }
       } catch {
         // Fallback to local storage if offline
@@ -195,6 +207,7 @@ export default function App() {
       clearInterval(syncInterval);
     };
   }, []);
+
 
   // Initial Load & Polling Intervals
   useEffect(() => {
@@ -264,6 +277,14 @@ export default function App() {
     await saveBinanceKeysToServer(updatedKeys);
     showToast(`อัปเดต Binance API Key เรียบร้อย (${updatedKeys.isTestnet ? 'Testnet' : 'Live'} | ${updatedKeys.marketType || 'SPOT'})`, 'info');
   };
+
+  const handleSaveTelegramConfig = async (updatedTelegram: TelegramConfig) => {
+    setTelegramConfig(updatedTelegram);
+    saveTelegramConfig(updatedTelegram);
+    await saveTelegramConfigToServer(updatedTelegram);
+    showToast(`บันทึกการตั้งค่า Telegram เรียบร้อย (${updatedTelegram.enabled ? 'เปิดใช้งาน 🟢' : 'ปิดใช้งาน 🔴'})`, 'info');
+  };
+
 
   const handleResetPaperAccount = async () => {
     if (confirm('คุณต้องการรีเซ็ตยอดเงินบัญชีทดลอง (Paper Trading) เป็น $1,000 USDT หรือไม่?')) {
@@ -430,6 +451,8 @@ export default function App() {
         botConfig={botConfig}
         paperAccount={paperAccount}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenTelegramSettings={() => setIsTelegramModalOpen(true)}
+        isTelegramEnabled={telegramConfig.enabled}
         onResetPaperAccount={handleResetPaperAccount}
         onToggleBot={() => {
           const nextState = !botConfig.isActive;
@@ -542,6 +565,15 @@ export default function App() {
         onSaveKeys={handleSaveBinanceKeys}
         onSaveConfig={handleSaveBotConfig}
       />
+
+      {/* Telegram Notification Settings Modal */}
+      <TelegramSettingsModal
+        isOpen={isTelegramModalOpen}
+        onClose={() => setIsTelegramModalOpen(false)}
+        config={telegramConfig}
+        onSave={handleSaveTelegramConfig}
+      />
     </div>
   );
 }
+

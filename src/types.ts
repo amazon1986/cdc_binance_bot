@@ -173,3 +173,19 @@ export interface AiAnalysisResponse {
   botRecommendation: string;
   riskAssessment: string;
 }
+
+export interface TelegramConfig {
+  botToken: string;
+  chatId: string;
+  enabled: boolean;
+  notifyOnBuy: boolean;
+  notifyOnSell: boolean;
+  notifyOnSignal: boolean;
+  notifyOnBotStatus: boolean;
+}
+
+export interface TelegramTestResponse {
+  success: boolean;
+  error?: string;
+}
+

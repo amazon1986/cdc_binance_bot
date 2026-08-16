@@ -1,4 +1,4 @@
-import { BotConfig, PaperAccount, ExecutedTrade, BinanceApiKeys, PaperPosition, Timeframe } from '../types';
+import { BotConfig, PaperAccount, ExecutedTrade, BinanceApiKeys, PaperPosition, Timeframe, TelegramConfig } from '../types';
 import { encryptText, decryptText } from './crypto';
 import { POPULAR_PAIRS } from './binanceApi';
 
@@ -9,7 +9,19 @@ const STORAGE_KEYS = {
   BINANCE_KEYS: 'cdc_binance_keys_v2',
   BOT_LOGS: 'cdc_bot_logs_v2',
   CUSTOM_SYMBOLS: 'cdc_custom_symbols_v2',
+  TELEGRAM_CONFIG: 'cdc_telegram_config_v2',
 };
+
+export const DEFAULT_TELEGRAM_CONFIG: TelegramConfig = {
+  botToken: '',
+  chatId: '',
+  enabled: false,
+  notifyOnBuy: true,
+  notifyOnSell: true,
+  notifyOnSignal: true,
+  notifyOnBotStatus: true,
+};
+
 
 export const DEFAULT_BOT_CONFIG: BotConfig = {
   id: 'default_bot',
@@ -164,3 +176,29 @@ export function getStoredSymbols(): string[] {
 export function saveStoredSymbols(symbols: string[]): void {
   localStorage.setItem(STORAGE_KEYS.CUSTOM_SYMBOLS, JSON.stringify(symbols));
 }
+
+export function getStoredTelegramConfig(): TelegramConfig {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.TELEGRAM_CONFIG);
+    if (!raw) return DEFAULT_TELEGRAM_CONFIG;
+    const parsed = JSON.parse(raw);
+    return {
+      ...DEFAULT_TELEGRAM_CONFIG,
+      ...parsed,
+      botToken: parsed.botToken ? decryptText(parsed.botToken) : '',
+      chatId: parsed.chatId ? decryptText(parsed.chatId) : '',
+    };
+  } catch {
+    return DEFAULT_TELEGRAM_CONFIG;
+  }
+}
+
+export function saveTelegramConfig(config: TelegramConfig): void {
+  const encryptedConfig = {
+    ...config,
+    botToken: config.botToken ? encryptText(config.botToken) : '',
+    chatId: config.chatId ? encryptText(config.chatId) : '',
+  };
+  localStorage.setItem(STORAGE_KEYS.TELEGRAM_CONFIG, JSON.stringify(encryptedConfig));
+}
+

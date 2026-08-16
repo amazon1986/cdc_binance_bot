@@ -15,6 +15,7 @@ import {
   RefreshCw,
   PieChart,
   Coffee,
+  Send,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -23,6 +24,8 @@ interface HeaderProps {
   botConfig: BotConfig;
   paperAccount: PaperAccount;
   onOpenSettings: () => void;
+  onOpenTelegramSettings?: () => void;
+  isTelegramEnabled?: boolean;
   onResetPaperAccount: () => void;
   onToggleBot: () => void;
   btcPrice?: number;
@@ -37,6 +40,8 @@ export const Header: React.FC<HeaderProps> = ({
   botConfig,
   paperAccount,
   onOpenSettings,
+  onOpenTelegramSettings,
+  isTelegramEnabled,
   onResetPaperAccount,
   onToggleBot,
   btcPrice,
@@ -44,6 +49,7 @@ export const Header: React.FC<HeaderProps> = ({
   tickers = [],
   onSelectSymbol,
 }) => {
+
   // Duplicate ticker list for seamless 100% infinite marquee loop
   const displayTickerItems = tickers.length > 0 ? [...tickers, ...tickers] : [];
 
@@ -166,6 +172,24 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </button>
 
+          {/* Telegram Notification Modal Button */}
+          {onOpenTelegramSettings && (
+            <button
+              onClick={onOpenTelegramSettings}
+              className={`p-2 rounded-lg border transition relative flex items-center justify-center ${
+                isTelegramEnabled
+                  ? 'bg-sky-500/15 border-sky-500/40 text-sky-400 hover:bg-sky-500/25'
+                  : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-400 hover:text-slate-200'
+              }`}
+              title="ตั้งค่าแจ้งเตือน Telegram Bot"
+            >
+              <Send className="w-4 h-4" />
+              {isTelegramEnabled && (
+                <span className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-emerald-400 rounded-full border-2 border-slate-900 animate-pulse" />
+              )}
+            </button>
+          )}
+
           {/* Settings Modal Button */}
           <button
             onClick={onOpenSettings}
@@ -174,6 +198,7 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Settings className="w-4 h-4" />
           </button>
+
         </div>
       </div>
 
