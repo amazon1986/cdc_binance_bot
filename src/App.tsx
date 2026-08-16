@@ -191,14 +191,28 @@ export default function App() {
           setPaperAccount(serverData.paperAccount);
           setTradeHistory(serverData.tradeHistory);
           setBotLogs(serverData.botLogs);
-          if (serverData.telegramConfig) {
-            setTelegramConfig((prev) => ({ ...prev, ...serverData.telegramConfig }));
+          if (serverData.telegramConfig && !isTelegramModalOpen) {
+            setTelegramConfig((prev) => {
+              if (
+                prev.botToken === serverData.telegramConfig?.botToken &&
+                prev.chatId === serverData.telegramConfig?.chatId &&
+                prev.enabled === serverData.telegramConfig?.enabled &&
+                prev.notifyOnBuy === serverData.telegramConfig?.notifyOnBuy &&
+                prev.notifyOnSell === serverData.telegramConfig?.notifyOnSell &&
+                prev.notifyOnSignal === serverData.telegramConfig?.notifyOnSignal &&
+                prev.notifyOnBotStatus === serverData.telegramConfig?.notifyOnBotStatus
+              ) {
+                return prev;
+              }
+              return { ...prev, ...serverData.telegramConfig };
+            });
           }
         }
       } catch {
         // Fallback to local storage if offline
       }
     };
+
 
     syncServerState();
     const syncInterval = setInterval(syncServerState, 3500);

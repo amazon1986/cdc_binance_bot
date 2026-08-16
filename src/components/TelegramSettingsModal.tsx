@@ -40,7 +40,7 @@ export const TelegramSettingsModal: React.FC<TelegramSettingsModalProps> = ({
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [showGuide, setShowGuide] = useState(false);
 
-  // Sync initial state whenever modal opens or config updates
+  // Sync initial state only when modal opens (not on background polling ticks)
   useEffect(() => {
     if (isOpen) {
       setBotToken(config.botToken || '');
@@ -52,7 +52,8 @@ export const TelegramSettingsModal: React.FC<TelegramSettingsModalProps> = ({
       setNotifyOnBotStatus(config.notifyOnBotStatus ?? true);
       setTestResult(null);
     }
-  }, [isOpen, config]);
+  }, [isOpen]);
+
 
   if (!isOpen) return null;
 
