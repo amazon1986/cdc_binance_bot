@@ -16,8 +16,7 @@ import {
 import { KlineData, Timeframe, CDCZoneColor } from '../types';
 import { getStoredSymbols } from '../lib/botStore';
 import { getZoneColorHex } from '../lib/cdcIndicator';
-import { formatCryptoPrice } from '../lib/binanceApi';
-import { RefreshCw, Search, ChevronDown, Activity, Info, Zap, Layers } from 'lucide-react';
+import { RefreshCw, Search, ChevronDown, Activity, Info, Zap, Layers, Maximize2 } from 'lucide-react';
 
 interface CDCChartProps {
   candles: KlineData[];
@@ -73,6 +72,7 @@ export const CDCChart: React.FC<CDCChartProps> = ({
   // Hovered or latest candle state for top OHLC header
   const [hoveredCandle, setHoveredCandle] = useState<KlineData | null>(null);
   const [calloutPosition, setCalloutPosition] = useState<{ x: number; y: number } | null>(null);
+  const lastLoadedKeyRef = useRef<string>('');
 
   const filteredPairs = useMemo(
     () => getStoredSymbols().filter((p) => p.toLowerCase().includes(searchQuery.toLowerCase())),
@@ -491,8 +491,12 @@ export const CDCChart: React.FC<CDCChartProps> = ({
       }
     }
 
-    // Auto fit visible range on fresh load
-    chartRef.current.timeScale().fitContent();
+    // Auto fit visible range ONLY on initial load or when switching symbol / timeframe
+    const currentKey = `${symbol}_${timeframe}`;
+    if (lastLoadedKeyRef.current !== currentKey) {
+      chartRef.current.timeScale().fitContent();
+      lastLoadedKeyRef.current = currentKey;
+    }
 
     // Redraw Overlay Ribbon & Update Callout
     setTimeout(() => {
@@ -713,6 +717,15 @@ export const CDCChart: React.FC<CDCChartProps> = ({
               <span>ป้ายเตือน</span>
             </button>
           </div>
+
+          {/* Fit View / Reset Zoom Button */}
+          <button
+            onClick={() => chartRef.current?.timeScale().fitContent()}
+            className="p-1.5 bg-[#2a2e39] hover:bg-[#363c4e] text-slate-300 rounded transition border border-slate-700/60"
+            title="จัดมุมมองกราฟให้พอดี (Fit View / Reset Zoom)"
+          >
+            <Maximize2 className="w-3.5 h-3.5 text-cyan-400" />
+          </button>
 
           {/* Refresh Button */}
           <button
