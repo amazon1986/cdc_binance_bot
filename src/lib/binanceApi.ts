@@ -9,7 +9,7 @@ const BINANCE_PUBLIC_BASE = 'https://api.binance.com/api/v3';
 export async function fetchBinanceKlines(
   symbol = 'BTCUSDT',
   interval: Timeframe = '1d',
-  limit = 300
+  limit = 1000
 ): Promise<KlineData[]> {
   const formattedSymbol = symbol.toUpperCase().replace('/', '');
   const url = `${BINANCE_PUBLIC_BASE}/klines?symbol=${formattedSymbol}&interval=${interval}&limit=${limit}`;

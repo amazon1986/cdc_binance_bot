@@ -127,7 +127,7 @@ export default function App() {
     setIsLoadingCandles(true);
     try {
       // A. Load Chart Viewing Candles (on chartTimeframe)
-      const chartRaw = await fetchBinanceKlines(botConfig.symbol, chartTimeframe, 300);
+      const chartRaw = await fetchBinanceKlines(botConfig.symbol, chartTimeframe, 1000);
       const chartCdc = calculateCDCActionZone(chartRaw, botConfig.fastEmaPeriod, botConfig.slowEmaPeriod);
       setCandles(chartCdc);
       if (chartCdc.length > 0) {
@@ -139,7 +139,7 @@ export default function App() {
       if (chartTimeframe === botConfig.timeframe) {
         setBotCandles(chartCdc);
       } else {
-        const botRaw = await fetchBinanceKlines(botConfig.symbol, botConfig.timeframe, 300);
+        const botRaw = await fetchBinanceKlines(botConfig.symbol, botConfig.timeframe, 500);
         const botCdc = calculateCDCActionZone(botRaw, botConfig.fastEmaPeriod, botConfig.slowEmaPeriod);
         setBotCandles(botCdc);
       }
