@@ -282,6 +282,9 @@ const alertedSignals = new Map<string, number>();
 
 // ==================== SERVER-SIDE 24/7 AUTOMATED CYCLE ====================
 
+// Map to track the last bar time an order was executed per symbol & timeframe
+const lastTradedBarTimes = new Map<string, number>();
+
 let isCycleRunning = false;
 
 async function runServerBotCycle() {
@@ -302,10 +305,17 @@ async function runServerBotCycle() {
       if (rawCandles.length < 30) continue;
 
       const cdcCandles = calculateCDCActionZone(rawCandles, config.fastEmaPeriod, config.slowEmaPeriod);
-      if (cdcCandles.length < 2) continue;
+      if (cdcCandles.length < 3) continue;
 
-      const latestCandle = cdcCandles[cdcCandles.length - 1];
-      const currentPrice = latestCandle.close;
+      // 🎯 Uncle Chaloke Rule: Separate Confirmed Closed Candles from Live Real-Time Candle
+      // rawCandles[length - 1] is the unclosed/forming candle (Live Price)
+      // rawCandles[length - 2] is the last fully CLOSED confirmed candle (Barstate Confirmed)
+      const liveCandle = cdcCandles[cdcCandles.length - 1];
+      const closedCandles = cdcCandles.slice(0, -1);
+      const confirmedCandle = closedCandles[closedCandles.length - 1];
+      const currentPrice = liveCandle.close;
+
+      const barKey = `${sym}_${config.timeframe}`;
 
       // 1. Check Exits on Active Positions for this symbol
       const existingPosIndex = serverState.paperAccount.activePositions.findIndex((p) => p.symbol === sym);
@@ -327,11 +337,12 @@ async function runServerBotCycle() {
         } else if (config.takeProfitPercent > 0 && pnlPercent >= config.takeProfitPercent) {
           exitReason = `Take Profit (+${config.takeProfitPercent}%)`;
         } else {
+          // Exit based strictly on CONFIRMED CLOSED BAR zone
           const isExitSignal = pos.side === 'SHORT'
-            ? config.buyOnSignal.includes(latestCandle.zone as any)
-            : config.sellOnSignal.includes(latestCandle.zone as any);
+            ? (config.buyOnSignal.includes(confirmedCandle.zone as any) || confirmedCandle.zone === 'BLUE' || confirmedCandle.zone === 'GREEN')
+            : (config.sellOnSignal.includes(confirmedCandle.zone as any) || confirmedCandle.zone === 'RED' || confirmedCandle.zone === 'YELLOW');
           if (isExitSignal) {
-            exitReason = `CDC Exit Signal ${latestCandle.colorNameTh}`;
+            exitReason = `CDC Exit Signal ${confirmedCandle.colorNameTh} (แท่งปิดคอนเฟิร์ม)`;
           }
         }
 
@@ -392,26 +403,28 @@ ${isWin ? '📈' : '📉'} <b>ผลตอบแทน (PnL):</b> ${isWin ? '+' 
         continue;
       }
 
-      // 2. Check Entries for this symbol
+      // 2. Check Entries for this symbol (Evaluated strictly on Confirmed Closed Bars)
       const maxPositions = config.maxOpenPositions || 5;
       if (serverState.paperAccount.activePositions.length >= maxPositions) {
         break; // Max concurrent slots reached
       }
 
-      const crossInfo = getCrossoverInfo(cdcCandles);
+      // 🎯 Calculate crossovers on confirmed closed candles only
+      const crossInfo = getCrossoverInfo(closedCandles);
       const isBuySignal = crossInfo.isFreshGoldenCross && (
-        (config.buyOnSignal.includes('BLUE') && latestCandle.zone === 'BLUE') ||
-        (config.buyOnSignal.includes('GREEN') && latestCandle.zone === 'GREEN') ||
-        (config.buyOnSignal.includes('BLUE') && config.buyOnSignal.includes('GREEN') && (latestCandle.zone === 'BLUE' || latestCandle.zone === 'GREEN'))
+        (config.buyOnSignal.includes('BLUE') && confirmedCandle.zone === 'BLUE') ||
+        (config.buyOnSignal.includes('GREEN') && confirmedCandle.zone === 'GREEN') ||
+        (confirmedCandle.zone === 'BLUE' || confirmedCandle.zone === 'GREEN')
       );
 
       const isSellSignal = crossInfo.isFreshDeadCross && (
-        (config.sellOnSignal.includes('RED') && latestCandle.zone === 'RED') ||
-        (config.sellOnSignal.includes('YELLOW') && latestCandle.zone === 'YELLOW')
+        (config.sellOnSignal.includes('RED') && confirmedCandle.zone === 'RED') ||
+        (config.sellOnSignal.includes('YELLOW') && confirmedCandle.zone === 'YELLOW') ||
+        (confirmedCandle.zone === 'RED')
       );
 
-      // Notify Fresh CDC Signal if not already alerted for this candle
-      const signalKey = `${sym}_${config.timeframe}_${latestCandle.time}`;
+      // Notify Fresh CDC Signal if not already alerted for this confirmed candle
+      const signalKey = `${sym}_${config.timeframe}_${confirmedCandle.time}`;
       if ((crossInfo.isFreshGoldenCross || crossInfo.isFreshDeadCross) && !alertedSignals.has(signalKey)) {
         alertedSignals.set(signalKey, Date.now());
         // Clean up cache
@@ -421,12 +434,13 @@ ${isWin ? '📈' : '📉'} <b>ผลตอบแทน (PnL):</b> ${isWin ? '+' 
         }
 
         const timeStr = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
-        const signalMsg = `📡 <b>[CDC Action Zone] ตรวจพบสัญญาณใหม่!</b>
+        const signalMsg = `📡 <b>[CDC Action Zone] ตรวจพบสัญญาณคอนเฟิร์มใหม่!</b>
 ━━━━━━━━━━━━━━━━━━━━
 🪙 <b>เหรียญ:</b> #${sym} (${config.timeframe})
-💡 <b>สัญญาณ:</b> ${latestCandle.colorNameTh} (${latestCandle.zone})
+💡 <b>สัญญาณปิดแท่ง:</b> ${confirmedCandle.colorNameTh} (${confirmedCandle.zone})
 🎯 <b>จุดตัด:</b> ${crossInfo.isFreshGoldenCross ? '✨ Golden Cross (EMA 12 ตัดขึ้น EMA 26)' : '⚡ Dead Cross (EMA 12 ตัดลง EMA 26)'}
 🏷 <b>ราคาปัจจุบัน:</b> $${currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 8 })}
+⏱ <b>สถานะแท่งเทียน:</b> ปิดแท่งสมบูรณ์แล้ว (Confirmed Close)
 🕒 <b>เวลา:</b> ${timeStr}`;
         sendTelegramNotification(signalMsg, 'SIGNAL');
       }
@@ -438,7 +452,8 @@ ${isWin ? '📈' : '📉'} <b>ผลตอบแทน (PnL):</b> ${isWin ? '+' 
         targetSide = 'SHORT';
       }
 
-      if (targetSide) {
+      // Check if we have already opened a trade on this exact confirmed candle bar
+      if (targetSide && lastTradedBarTimes.get(barKey) !== confirmedCandle.time) {
         const tradeUsdt = calculateOrderSize(config, serverState.paperAccount);
         const lev = Math.min(Math.max(1, config.leverage || 1), 10);
         if (tradeUsdt >= 10 && serverState.paperAccount.usdtBalance >= tradeUsdt) {
@@ -465,6 +480,7 @@ ${isWin ? '📈' : '📉'} <b>ผลตอบแทน (PnL):</b> ${isWin ? '+' 
           };
 
           serverState.paperAccount.activePositions.push(newPos);
+          lastTradedBarTimes.set(barKey, confirmedCandle.time);
 
           const trade: ExecutedTrade = {
             id: `trade_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -475,13 +491,13 @@ ${isWin ? '📈' : '📉'} <b>ผลตอบแทน (PnL):</b> ${isWin ? '+' 
             amount: coinAmount,
             usdtValue: notionalValue,
             leverage: lev,
-            reason: `[Cloud 24/7 Entry ${lev}x] CDC ${latestCandle.colorNameTh} (${targetSide})`,
+            reason: `[Cloud 24/7 Entry ${lev}x] CDC ${confirmedCandle.colorNameTh} (${targetSide}) [Confirmed Bar]`,
             timestamp: Date.now(),
             mode: config.mode,
           };
 
           serverState.tradeHistory.unshift(trade);
-          addServerLog(`🚀 [SERVER 24/7 OPEN ${targetSide} ${lev}x] ${sym} @ $${currentPrice} | ทุน $${tradeUsdt.toFixed(2)} USDT (มูลค่าสัญญา $${notionalValue.toFixed(2)}) | สัญญาณ ${latestCandle.colorNameTh}`);
+          addServerLog(`🚀 [SERVER 24/7 OPEN ${targetSide} ${lev}x] ${sym} @ $${currentPrice} | ทุน $${tradeUsdt.toFixed(2)} USDT (มูลค่าสัญญา $${notionalValue.toFixed(2)}) | สัญญาณปิดแท่ง ${confirmedCandle.colorNameTh}`);
           saveServerState();
 
           // Telegram Alert for Open Order
@@ -489,8 +505,8 @@ ${isWin ? '📈' : '📉'} <b>ผลตอบแทน (PnL):</b> ${isWin ? '+' 
           const tgOpenMsg = `🟢 <b>[CDC Action Zone Bot] สั่งเปิดออเดอร์ใหม่!</b>
 ━━━━━━━━━━━━━━━━━━━━
 🪙 <b>เหรียญ:</b> #${sym}
-📊 <b>สัญญาณ:</b> CDC ${latestCandle.colorNameTh} (${targetSide} ${lev}x)
-⏱ <b>ไทม์เฟรม:</b> ${config.timeframe}
+📊 <b>สัญญาณปิดแท่ง:</b> CDC ${confirmedCandle.colorNameTh} (${targetSide} ${lev}x)
+⏱ <b>ไทม์เฟรม:</b> ${config.timeframe} (Confirmed Close)
 💰 <b>ราคาเข้า:</b> $${currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 8 })}
 ⚡ <b>Leverage:</b> ${lev}x (${config.marketType || 'SPOT'})
 💵 <b>เงินทุน:</b> $${tradeUsdt.toFixed(2)} USDT (มูลค่า $${notionalValue.toFixed(2)})
@@ -504,6 +520,7 @@ ${isWin ? '📈' : '📉'} <b>ผลตอบแทน (PnL):</b> ${isWin ? '+' 
     }
   } catch (err) {
     console.error('Error in server bot cycle:', err);
+
 
   } finally {
     isCycleRunning = false;
