@@ -26,24 +26,24 @@ export const DEFAULT_TELEGRAM_CONFIG: TelegramConfig = {
 export const DEFAULT_BOT_CONFIG: BotConfig = {
   id: 'default_bot',
   symbol: 'BTCUSDT',
-  timeframe: '1d', // 🚀 Default to 1D (Daily) as requested by user
+  timeframe: '1d', // 🚀 Default to 1D (Daily)
   fastEmaPeriod: 12,
   slowEmaPeriod: 26,
-  tradeAmountUsdt: 200,
+  tradeAmountUsdt: 100,
   usePercentBalance: true,
-  balancePercent: 20,
+  balancePercent: 10,
   positionSizingMode: 'EQUAL_WEIGHT', // 🎯 ถัวเฉลี่ยเท่ากันทุกเหรียญ (Equal Weight Sizing)
-  leverage: 1, // ⚡ Default 1x (1x to 10x)
-  maxOpenPositions: 5, // 🎯 ถือครองสูงสุด 5 ไม้ (แบ่งเท่ากันไม้ละ 20% ของพอร์ตรวม)
+  leverage: 2, // ⚡ Default 2x (1x to 10x)
+  maxOpenPositions: 10, // 🎯 ถือครองสูงสุด 10 ไม้ (แบ่งเท่ากันไม้ละ 10% ของพอร์ตรวม)
   stopLossPercent: 5,
-  takeProfitPercent: 15,
+  takeProfitPercent: 25, // 🎯 Target Take Profit 25%
   useTrailingStop: false,
   trailingStopPercent: 3,
   buyOnSignal: ['BLUE', 'GREEN'], // 🎯 สัญญาณฟ้าแรก หรือ เขียวแรกคอนเฟิร์มตามลุงโฉลก (Safe Confirmed Entry)
   sellOnSignal: ['RED'], // 🎯 ขายออก/Short เฉพาะสัญญาณแดงแรกคอนเฟิร์ม (Bearish Cash Out)
   mode: 'PAPER',
-  scanMode: 'SINGLE',
-  directionMode: 'LONG_ONLY',
+  scanMode: 'MULTI_SCAN', // 🎯 สแกนเปิดออเดอร์ทุกเหรียญอัตโนมัติ
+  directionMode: 'BOTH', // 🎯 เล่นทั้งฝั่ง Long & Short
   isActive: false,
 };
 
@@ -64,14 +64,16 @@ export function getStoredBotConfig(): BotConfig {
     const raw = localStorage.getItem(STORAGE_KEYS.BOT_CONFIG);
     if (!raw) return DEFAULT_BOT_CONFIG;
     const parsed = JSON.parse(raw);
-    const lev = Math.min(Math.max(1, parseInt(parsed.leverage || 1, 10)), 10);
+    const lev = Math.min(Math.max(1, parseInt(parsed.leverage || 2, 10)), 10);
     return {
       ...DEFAULT_BOT_CONFIG,
       ...parsed,
-      leverage: isNaN(lev) ? 1 : lev,
+      leverage: isNaN(lev) ? 2 : lev,
       timeframe: parsed.timeframe || '1d',
-      maxOpenPositions: parsed.maxOpenPositions && parsed.maxOpenPositions > 0 ? parsed.maxOpenPositions : 5,
+      maxOpenPositions: parsed.maxOpenPositions && parsed.maxOpenPositions > 0 ? parsed.maxOpenPositions : 10,
       positionSizingMode: parsed.positionSizingMode || 'EQUAL_WEIGHT',
+      scanMode: parsed.scanMode || 'MULTI_SCAN',
+      directionMode: parsed.directionMode || 'BOTH',
       buyOnSignal: parsed.buyOnSignal && parsed.buyOnSignal.length > 0 ? parsed.buyOnSignal : ['BLUE', 'GREEN'],
       sellOnSignal: parsed.sellOnSignal && parsed.sellOnSignal.length > 0 ? parsed.sellOnSignal : ['RED'],
     };
