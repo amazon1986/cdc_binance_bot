@@ -218,3 +218,139 @@ export function getCrossoverInfo(candles: KlineData[]): CrossoverInfo {
     isFreshDeadCross: barsSinceDeadCross <= 1,
   };
 }
+
+export interface CoinQualityEvaluation {
+  barsSinceGoldenCross: number;
+  barsSinceDeadCross: number;
+  isFreshGoldenCross: boolean;
+  isFreshDeadCross: boolean;
+  confirmationStatus: 'EXACT_CROSS' | 'CONFIRMED_PLUS_1' | 'TRENDING' | 'NO_SIGNAL';
+  rankType: 'BEST_BUY' | 'BEST_SELL' | 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+  signalQualityScore: number;
+  reasonTh: string;
+  actionRecommendationTh: string;
+}
+
+/**
+ * Evaluates coin ranking & quality according to Uncle Chaloke's CDC Action Zone Theory:
+ * "เขียวซื้อ แดงขาย" with exact entry and exit at crossover + 1 bar.
+ */
+export function evaluateCoinQuality(
+  candles: KlineData[],
+  priceChange24h = 0,
+  volume24h = 0
+): CoinQualityEvaluation {
+  if (!candles || candles.length === 0) {
+    return {
+      barsSinceGoldenCross: 999,
+      barsSinceDeadCross: 999,
+      isFreshGoldenCross: false,
+      isFreshDeadCross: false,
+      confirmationStatus: 'NO_SIGNAL',
+      rankType: 'NEUTRAL',
+      signalQualityScore: 0,
+      reasonTh: 'ไม่มีข้อมูลแท่งเทียนเพียงพอ',
+      actionRecommendationTh: 'รอสัญญาณ',
+    };
+  }
+
+  const crossInfo = getCrossoverInfo(candles);
+  const latest = candles[candles.length - 1];
+  const zone = latest.zone || 'CYAN';
+  const emaFast = latest.emaFast ?? latest.close;
+  const emaSlow = latest.emaSlow ?? latest.close;
+  const emaDiffPct = emaSlow > 0 ? Math.abs(((emaFast - emaSlow) / emaSlow) * 100) : 0;
+
+  let score = 0;
+  let rankType: 'BEST_BUY' | 'BEST_SELL' | 'BULLISH' | 'BEARISH' | 'NEUTRAL' = 'NEUTRAL';
+  let confirmationStatus: 'EXACT_CROSS' | 'CONFIRMED_PLUS_1' | 'TRENDING' | 'NO_SIGNAL' = 'NO_SIGNAL';
+  let reasonTh = 'รอการตัดกันของเส้น EMA 12 และ EMA 26';
+  let actionRecommendationTh = 'เฝ้าระวัง';
+
+  // Volume factor (max 15 pts)
+  if (volume24h >= 50_000_000) score += 15;
+  else if (volume24h >= 10_000_000) score += 10;
+  else if (volume24h >= 1_000_000) score += 5;
+
+  // Evaluation for BUY (Uncle Chaloke: เขียวซื้อ / จุดตัด Golden Cross +1 แท่ง)
+  if (crossInfo.isFreshGoldenCross) {
+    if (crossInfo.barsSinceGoldenCross === 1) {
+      confirmationStatus = 'CONFIRMED_PLUS_1';
+      score += 55; // Highest confidence: confirmed 1 bar after cross
+    } else {
+      confirmationStatus = 'EXACT_CROSS';
+      score += 45; // Crossover candle bar 0
+    }
+
+    if (zone === 'BLUE' || zone === 'GREEN') {
+      rankType = 'BEST_BUY';
+      score += 25;
+      if (latest.close >= emaFast) score += 10;
+      if (priceChange24h > 0) score += Math.min(10, priceChange24h * 1.5);
+
+      reasonTh = confirmationStatus === 'CONFIRMED_PLUS_1'
+        ? `✨ จุดตัด Golden Cross คอนเฟิร์ม +1 แท่ง (${getZoneNameTh(zone)}) เข้าซื้อจุดต้นเทรนด์สมบูรณ์แบบ`
+        : `✨ กำลังเกิดจุดตัด Golden Cross แท่งแรก (${getZoneNameTh(zone)}) เตรียมเข้าซื้อ`;
+      actionRecommendationTh = '🟢 เข้าซื้อ / Open Long';
+    }
+  }
+  // Evaluation for SELL / SHORT (Uncle Chaloke: แดงขาย / จุดตัด Dead Cross +1 แท่ง)
+  else if (crossInfo.isFreshDeadCross) {
+    if (crossInfo.barsSinceDeadCross === 1) {
+      confirmationStatus = 'CONFIRMED_PLUS_1';
+      score += 55;
+    } else {
+      confirmationStatus = 'EXACT_CROSS';
+      score += 45;
+    }
+
+    if (zone === 'RED' || zone === 'YELLOW') {
+      rankType = 'BEST_SELL';
+      score += 25;
+      if (latest.close <= emaFast) score += 10;
+      if (priceChange24h < 0) score += Math.min(10, Math.abs(priceChange24h) * 1.5);
+
+      reasonTh = confirmationStatus === 'CONFIRMED_PLUS_1'
+        ? `⚡ จุดตัด Dead Cross คอนเฟิร์ม +1 แท่ง (${getZoneNameTh(zone)}) ขายทำกำไร / เปิด Short ทันที`
+        : `⚡ กำลังเกิดจุดตัด Dead Cross แท่งแรก (${getZoneNameTh(zone)}) เตรียมขายออก / Short`;
+      actionRecommendationTh = '🔴 ขายออก / Open Short';
+    }
+  }
+  // If not fresh crossover but in active trending zone
+  else if (zone === 'GREEN' || zone === 'BLUE') {
+    confirmationStatus = 'TRENDING';
+    rankType = 'BULLISH';
+    score += 35;
+    if (crossInfo.barsSinceGoldenCross <= 5) score += 15;
+    reasonTh = `📈 ขาขึ้นต่อเนื่อง (${getZoneNameTh(zone)}) ห่างจุดตัด ${crossInfo.barsSinceGoldenCross} แท่ง`;
+    actionRecommendationTh = 'ถือครองต่อ / Hold Long';
+  } else if (zone === 'RED') {
+    confirmationStatus = 'TRENDING';
+    rankType = 'BEARISH';
+    score += 35;
+    if (crossInfo.barsSinceDeadCross <= 5) score += 15;
+    reasonTh = `📉 ขาลงต่อเนื่อง (${getZoneNameTh(zone)}) ห่างจุดตัด ${crossInfo.barsSinceDeadCross} แท่ง`;
+    actionRecommendationTh = 'ถือเงินสด / Hold Cash';
+  } else {
+    confirmationStatus = 'TRENDING';
+    rankType = 'NEUTRAL';
+    score += 15;
+    reasonTh = `ไซด์เวย์ / พักตัว (${getZoneNameTh(zone)})`;
+    actionRecommendationTh = 'รอความชัดเจน';
+  }
+
+  // Ensure score in range 0 - 100
+  const finalScore = Math.min(100, Math.max(10, Math.round(score)));
+
+  return {
+    barsSinceGoldenCross: crossInfo.barsSinceGoldenCross,
+    barsSinceDeadCross: crossInfo.barsSinceDeadCross,
+    isFreshGoldenCross: crossInfo.isFreshGoldenCross,
+    isFreshDeadCross: crossInfo.isFreshDeadCross,
+    confirmationStatus,
+    rankType,
+    signalQualityScore: finalScore,
+    reasonTh,
+    actionRecommendationTh,
+  };
+}

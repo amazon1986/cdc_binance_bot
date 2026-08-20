@@ -141,6 +141,9 @@ export interface BacktestResult {
   equityCurve: { time: number; equity: number; price: number }[];
 }
 
+export type CoinRankType = 'BEST_BUY' | 'BEST_SELL' | 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+export type ConfirmationStatus = 'EXACT_CROSS' | 'CONFIRMED_PLUS_1' | 'TRENDING' | 'NO_SIGNAL';
+
 export interface ScannerCoinResult {
   symbol: string;
   currentPrice: number;
@@ -153,6 +156,16 @@ export interface ScannerCoinResult {
   emaSlow: number;
   trendStrength: number; // % difference between Fast and Slow EMA
   lastSignalTime: string;
+  // CDC Uncle Chaloke Extended Analysis
+  barsSinceGoldenCross: number;
+  barsSinceDeadCross: number;
+  isFreshGoldenCross: boolean; // barsSince <= 1
+  isFreshDeadCross: boolean;   // barsSince <= 1
+  confirmationStatus: ConfirmationStatus;
+  rankType: CoinRankType;
+  signalQualityScore: number; // 0 to 100
+  reasonTh: string;
+  actionRecommendationTh: string;
 }
 
 export interface BinanceApiKeys {

@@ -92,8 +92,8 @@ const DEFAULT_SERVER_STATE: ServerState = {
     isActive: false,
   },
   paperAccount: {
-    usdtBalance: 1000,
-    initialUsdtBalance: 1000,
+    usdtBalance: 10000,
+    initialUsdtBalance: 10000,
     activePositions: [],
     totalTrades: 0,
     winningTrades: 0,
@@ -125,11 +125,17 @@ function loadServerState() {
     if (fs.existsSync(STATE_FILE)) {
       const raw = fs.readFileSync(STATE_FILE, 'utf-8');
       const parsed = JSON.parse(raw);
+      const parsedPaper = parsed.paperAccount || {};
+      // Auto-upgrade legacy default $1,000 to $10,000 if untouched
+      if (parsedPaper.initialUsdtBalance === 1000 && parsedPaper.usdtBalance === 1000 && (!parsedPaper.activePositions || parsedPaper.activePositions.length === 0) && (!parsed.tradeHistory || parsed.tradeHistory.length === 0)) {
+        parsedPaper.usdtBalance = 10000;
+        parsedPaper.initialUsdtBalance = 10000;
+      }
       serverState = {
         ...DEFAULT_SERVER_STATE,
         ...parsed,
         botConfig: { ...DEFAULT_SERVER_STATE.botConfig, ...(parsed.botConfig || {}) },
-        paperAccount: { ...DEFAULT_SERVER_STATE.paperAccount, ...(parsed.paperAccount || {}) },
+        paperAccount: { ...DEFAULT_SERVER_STATE.paperAccount, ...parsedPaper },
         tradeHistory: Array.isArray(parsed.tradeHistory) ? parsed.tradeHistory : [],
         botLogs: Array.isArray(parsed.botLogs) ? parsed.botLogs : [],
         telegramConfig: { ...DEFAULT_SERVER_STATE.telegramConfig, ...(parsed.telegramConfig || {}) },
@@ -762,8 +768,8 @@ app.post('/api/bot/clear-logs', (req, res) => {
 // 7. Reset Paper Account
 app.post('/api/bot/reset-paper', (req, res) => {
   serverState.paperAccount = {
-    usdtBalance: 1000,
-    initialUsdtBalance: 1000,
+    usdtBalance: 10000,
+    initialUsdtBalance: 10000,
     activePositions: [],
     totalTrades: 0,
     winningTrades: 0,
@@ -771,7 +777,7 @@ app.post('/api/bot/reset-paper', (req, res) => {
     totalProfitUsdt: 0,
   };
   serverState.tradeHistory = [];
-  addServerLog('🔄 รีเซ็ตพอร์ตจำลอง (Paper Account) เรียบร้อยแล้ว');
+  addServerLog('🔄 รีเซ็ตพอร์ตจำลอง (Paper Account) เป็น $10,000 USDT เรียบร้อยแล้ว');
   saveServerState();
   return res.json({ success: true });
 });

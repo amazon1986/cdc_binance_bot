@@ -48,8 +48,8 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
 };
 
 export const DEFAULT_PAPER_ACCOUNT: PaperAccount = {
-  usdtBalance: 1000,
-  initialUsdtBalance: 1000,
+  usdtBalance: 10000,
+  initialUsdtBalance: 10000,
   activePositions: [],
   totalTrades: 0,
   winningTrades: 0,
@@ -89,7 +89,13 @@ export function saveBotConfig(config: BotConfig): void {
 export function getStoredPaperAccount(): PaperAccount {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.PAPER_ACCOUNT);
-    return raw ? JSON.parse(raw) : DEFAULT_PAPER_ACCOUNT;
+    if (!raw) return DEFAULT_PAPER_ACCOUNT;
+    const parsed: PaperAccount = JSON.parse(raw);
+    // Auto-upgrade legacy default $1,000 account to $10,000 if no active positions & 0 trades
+    if (parsed.initialUsdtBalance === 1000 && parsed.usdtBalance === 1000 && (!parsed.activePositions || parsed.activePositions.length === 0) && parsed.totalTrades === 0) {
+      return DEFAULT_PAPER_ACCOUNT;
+    }
+    return parsed;
   } catch {
     return DEFAULT_PAPER_ACCOUNT;
   }
