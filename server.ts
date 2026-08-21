@@ -242,6 +242,108 @@ async function fetchKlinesDirect(symbol: string, interval: string, limit = 300):
   }
 }
 
+async function executeLiveServerOrder(params: {
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  quantity: number;
+  reduceOnly?: boolean;
+  leverage?: number;
+}): Promise<{ success: boolean; orderId?: string | number; error?: string }> {
+  const keys = serverState.liveApiKeys;
+  if (!keys || !keys.apiKey || !keys.apiSecret) {
+    return { success: false, error: 'Live API keys not configured on server' };
+  }
+
+  const marketType = keys.marketType || serverState.botConfig.marketType || 'FUTURES';
+  const isTestnet = !!keys.isTestnet;
+
+  try {
+    if (marketType === 'FUTURES') {
+      const baseUrl = isTestnet
+        ? 'https://testnet.binancefuture.com/fapi/v1'
+        : 'https://fapi.binance.com/fapi/v1';
+
+      // 1. Set leverage if specified
+      if (params.leverage && params.leverage >= 1) {
+        try {
+          const { timestamp, recvWindow } = await getBinanceTimestamp(baseUrl);
+          const levQuery = buildBinanceSignedQuery(
+            `symbol=${params.symbol}&leverage=${params.leverage}&recvWindow=${recvWindow}&timestamp=${timestamp}`,
+            keys.apiSecret
+          );
+          await fetch(`${baseUrl}/leverage?${levQuery}`, {
+            method: 'POST',
+            headers: { 'X-MBX-APIKEY': keys.apiKey },
+          });
+        } catch (levErr) {
+          console.warn('Failed to set leverage on Binance:', levErr);
+        }
+      }
+
+      // 2. Format quantity
+      const qty = parseFloat(params.quantity.toFixed(6));
+      const { timestamp, recvWindow } = await getBinanceTimestamp(baseUrl);
+      let queryParts = [
+        `symbol=${params.symbol}`,
+        `side=${params.side}`,
+        `type=MARKET`,
+        `quantity=${qty}`,
+        `recvWindow=${recvWindow}`,
+        `timestamp=${timestamp}`,
+      ];
+
+      if (params.reduceOnly) {
+        queryParts.push('reduceOnly=true');
+      }
+
+      const signedQuery = buildBinanceSignedQuery(queryParts.join('&'), keys.apiSecret);
+      const res = await fetch(`${baseUrl}/order?${signedQuery}`, {
+        method: 'POST',
+        headers: { 'X-MBX-APIKEY': keys.apiKey },
+      });
+
+      const data = await res.json();
+      if (!res.ok || data.code) {
+        return { success: false, error: data.msg || 'Binance Futures order error' };
+      }
+
+      return { success: true, orderId: data.orderId };
+    } else {
+      // Spot Order
+      const baseUrl = isTestnet
+        ? 'https://testnet.binance.vision/api/v3'
+        : 'https://api.binance.com/api/v3';
+
+      const qty = parseFloat(params.quantity.toFixed(6));
+      const { timestamp, recvWindow } = await getBinanceTimestamp(baseUrl);
+      const queryParts = [
+        `symbol=${params.symbol}`,
+        `side=${params.side}`,
+        `type=MARKET`,
+        `quantity=${qty}`,
+        `recvWindow=${recvWindow}`,
+        `timestamp=${timestamp}`,
+      ];
+
+      const signedQuery = buildBinanceSignedQuery(queryParts.join('&'), keys.apiSecret);
+      const res = await fetch(`${baseUrl}/order?${signedQuery}`, {
+        method: 'POST',
+        headers: { 'X-MBX-APIKEY': keys.apiKey },
+      });
+
+      const data = await res.json();
+      if (!res.ok || data.code) {
+        return { success: false, error: data.msg || 'Binance Spot order error' };
+      }
+
+      return { success: true, orderId: data.orderId };
+    }
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Live order execution failed' };
+  }
+}
+
+
 // ==================== TELEGRAM NOTIFICATION ENGINE ====================
 
 async function sendTelegramNotification(
@@ -386,6 +488,25 @@ async function runServerBotCycle() {
         }
 
         if (exitReason) {
+          // If Live Mode and API keys are present, execute live exit on Binance
+          if (config.mode === 'BINANCE_LIVE' && serverState.liveApiKeys) {
+            try {
+              const liveExitRes = await executeLiveServerOrder({
+                symbol: pos.symbol,
+                side: pos.side === 'LONG' ? 'SELL' : 'BUY',
+                quantity: pos.amount,
+                reduceOnly: true,
+              });
+              if (liveExitRes.success) {
+                addServerLog(`⚡ [LIVE BINANCE] ปิดสัญญาจริง ${pos.symbol} สำเร็จ (OrderId: ${liveExitRes.orderId})`);
+              } else {
+                addServerLog(`⚠️ [LIVE BINANCE] ปิดสัญญาจริง ${pos.symbol} ไม่สำเร็จ: ${liveExitRes.error}`);
+              }
+            } catch (err: any) {
+              console.error('Live exit order error:', err);
+            }
+          }
+
           const returnUsdt = Math.max(0, margin + pnlUsdt);
           serverState.paperAccount.usdtBalance += returnUsdt;
           serverState.paperAccount.activePositions.splice(existingPosIndex, 1);
@@ -536,6 +657,25 @@ ${isWin ? '📈' : '📉'} <b>ผลตอบแทน (PnL):</b> ${isWin ? '+' 
           serverState.paperAccount.activePositions.push(newPos);
           lastTradedBarTimes.set(barKey, confirmedCandle.time);
 
+          // If Live Mode and API keys are present, execute live entry on Binance
+          if (config.mode === 'BINANCE_LIVE' && serverState.liveApiKeys) {
+            try {
+              const liveEntryRes = await executeLiveServerOrder({
+                symbol: sym,
+                side: targetSide === 'LONG' ? 'BUY' : 'SELL',
+                quantity: coinAmount,
+                leverage: lev,
+              });
+              if (liveEntryRes.success) {
+                addServerLog(`⚡ [LIVE BINANCE] เปิดสัญญาจริง ${targetSide} ${sym} สำเร็จ (OrderId: ${liveEntryRes.orderId})`);
+              } else {
+                addServerLog(`⚠️ [LIVE BINANCE] เปิดสัญญาจริง ${sym} ไม่สำเร็จ: ${liveEntryRes.error}`);
+              }
+            } catch (err: any) {
+              console.error('Live entry order error:', err);
+            }
+          }
+
           const trade: ExecutedTrade = {
             id: `trade_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
             symbol: sym,
@@ -655,7 +795,7 @@ app.post('/api/bot/toggle', (req, res) => {
 });
 
 // 4. Manual Order
-app.post('/api/bot/manual-order', (req, res) => {
+app.post('/api/bot/manual-order', async (req, res) => {
   try {
     const { symbol, side, amountUsdt, currentPrice } = req.body;
     if (!symbol || !side || !amountUsdt || !currentPrice) {
@@ -707,6 +847,26 @@ app.post('/api/bot/manual-order', (req, res) => {
 
     serverState.tradeHistory.unshift(trade);
     addServerLog(`✋ [MANUAL ORDER ${lev}x] เปิด ${side} ${symbol} @ $${currentPrice} | ทุน $${amountUsdt} USDT (มูลค่าสัญญา $${notionalValue.toFixed(2)})`);
+
+    // If Live Mode and API keys configured, execute live order on Binance as well
+    if (serverState.botConfig.mode === 'BINANCE_LIVE' && serverState.liveApiKeys) {
+      try {
+        const liveRes = await executeLiveServerOrder({
+          symbol,
+          side: side === 'LONG' ? 'BUY' : 'SELL',
+          quantity: coinAmount,
+          leverage: lev,
+        });
+        if (liveRes.success) {
+          addServerLog(`⚡ [LIVE MANUAL] ส่งคำสั่งจริง ${side} ${symbol} สำเร็จ (OrderId: ${liveRes.orderId})`);
+        } else {
+          addServerLog(`⚠️ [LIVE MANUAL] ส่งคำสั่งจริง ${side} ${symbol} ไม่สำเร็จ: ${liveRes.error}`);
+        }
+      } catch (err: any) {
+        console.error('Live manual order error:', err);
+      }
+    }
+
     saveServerState();
 
     // Telegram Alert for Manual Order
@@ -784,6 +944,26 @@ app.post('/api/bot/close-position', async (req, res) => {
 
     serverState.tradeHistory.unshift(trade);
     addServerLog(`✋ [MANUAL CLOSE ${posLev}x] ปิดสัญญา ${pos.symbol} @ $${currentPrice} | PnL: ${pnlUsdt >= 0 ? '+' : ''}$${pnlUsdt.toFixed(2)} (${pnlPercent.toFixed(2)}%)`);
+
+    // If Live Mode and API keys configured, execute live close on Binance as well
+    if (serverState.botConfig.mode === 'BINANCE_LIVE' && serverState.liveApiKeys) {
+      try {
+        const liveCloseRes = await executeLiveServerOrder({
+          symbol: pos.symbol,
+          side: pos.side === 'LONG' ? 'SELL' : 'BUY',
+          quantity: pos.amount,
+          reduceOnly: true,
+        });
+        if (liveCloseRes.success) {
+          addServerLog(`⚡ [LIVE MANUAL CLOSE] ปิดสัญญาจริง ${pos.symbol} สำเร็จ (OrderId: ${liveCloseRes.orderId})`);
+        } else {
+          addServerLog(`⚠️ [LIVE MANUAL CLOSE] ปิดสัญญาจริง ${pos.symbol} ไม่สำเร็จ: ${liveCloseRes.error}`);
+        }
+      } catch (err: any) {
+        console.error('Live manual close error:', err);
+      }
+    }
+
     saveServerState();
 
     // Telegram Alert for Manual Close
