@@ -29,12 +29,12 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
   timeframe: '1d', // 🚀 Default to 1D (Daily)
   fastEmaPeriod: 12,
   slowEmaPeriod: 26,
-  tradeAmountUsdt: 100,
+  tradeAmountUsdt: 15, // 🎯 เหมาะสำหรับพอร์ตทุนน้อย $50 USDT (ไม้ละ $15)
   usePercentBalance: true,
-  balancePercent: 10,
+  balancePercent: 33, // 🎯 ไม้ละ ~33% สำหรับพอร์ต $50 (3 ไม้)
   positionSizingMode: 'EQUAL_WEIGHT', // 🎯 ถัวเฉลี่ยเท่ากันทุกเหรียญ (Equal Weight Sizing)
-  leverage: 2, // ⚡ Default 2x (1x to 10x)
-  maxOpenPositions: 10, // 🎯 ถือครองสูงสุด 10 ไม้ (แบ่งเท่ากันไม้ละ 10% ของพอร์ตรวม)
+  leverage: 3, // ⚡ Default 3x (ปลอดภัยและผ่านเกณฑ์ขั้นต่ำ $5 ของ Binance เสมอ)
+  maxOpenPositions: 3, // 🎯 ถือครองสูงสุด 3 ไม้ (แบ่งไม้ละ ~$16 บนทุน $50)
   stopLossPercent: 5,
   takeProfitPercent: 25, // 🎯 Target Take Profit 25%
   useTrailingStop: false,
@@ -42,7 +42,7 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
   useWhipsawProtection: true, // 🛡️ เปิดใช้ Stop Loss Lock (Whipsaw Protection)
   buyOnSignal: ['BLUE', 'GREEN'], // 🎯 สัญญาณฟ้าแรก หรือ เขียวแรกคอนเฟิร์มตามลุงโฉลก (Safe Confirmed Entry)
   sellOnSignal: ['RED'], // 🎯 ขายออก/Short เฉพาะสัญญาณแดงแรกคอนเฟิร์ม (Bearish Cash Out)
-  mode: 'PAPER',
+  mode: 'BINANCE_LIVE', // ⚡ Default เป็นกระเป๋าจริง Binance Live
   scanMode: 'MULTI_SCAN', // 🎯 สแกนเปิดออเดอร์ทุกเหรียญอัตโนมัติ
   directionMode: 'BOTH', // 🎯 เล่นทั้งฝั่ง Long & Short
   isActive: false,

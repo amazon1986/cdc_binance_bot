@@ -698,14 +698,13 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
                 <span className="text-xs font-bold text-emerald-400 flex items-center space-x-1.5">
                   <DollarSign className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>การจัดสรรเงินทุนต่อไม้ (Equal Weight Money Management)</span>
+                  <span>การจัดสรรเงินทุนต่อไม้ ({isLiveMode ? 'คำนวณจากยอดพอร์ตจริง' : 'พอร์ตจำลอง'})</span>
                 </span>
-                <span className="text-[11px] font-mono text-emerald-300/90 font-semibold">
+                <span className="text-[11px] font-mono text-emerald-300/90 font-bold">
                   {configForm.positionSizingMode === 'EQUAL_WEIGHT'
                     ? `แบ่งเท่ากันไม้ละ ≈ $${(
-                        (paperAccount.usdtBalance +
-                          paperAccount.activePositions.reduce((s, p) => s + (p.usdtInvested || 0), 0)) /
-                        (configForm.maxOpenPositions || 5)
+                        (isLiveMode ? (effectiveBalance > 0 ? effectiveBalance : 50) : (paperAccount.usdtBalance + paperAccount.activePositions.reduce((s, p) => s + (p.usdtInvested || 0), 0))) /
+                        (configForm.maxOpenPositions || 3)
                       ).toFixed(2)} USDT`
                     : configForm.positionSizingMode === 'PERCENT_EQUITY'
                     ? `ไม้ละ ${configForm.balancePercent}% ของพอร์ตรวม`
@@ -713,6 +712,14 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
                 </span>
               </div>
 
+              {/* Low Capital Guide Note */}
+              <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-lg p-2.5 flex items-start space-x-2 text-[11px] text-emerald-200">
+                <Sparkles className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                <div className="leading-relaxed">
+                  <span className="font-bold text-emerald-300 block">💡 สำหรับพอร์ตทุนเริ่มต้นน้อย (เช่น $50 - $100 USDT):</span>
+                  สามารถตั้งถือครอง 2-3 เหรียญ (เฉลี่ยไม้ละ $15 - $25) ร่วมกับ Leverage 2x - 3x บอทจะเปิดสัญญาได้อย่างราบรื่นและผ่านเกณฑ์ขั้นต่ำ $5 USDT ของ Binance เสมอ
+                </div>
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
                 {/* Sizing Mode */}
                 <div>
