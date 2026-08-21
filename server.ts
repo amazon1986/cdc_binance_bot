@@ -743,16 +743,25 @@ ${isWin ? '📈' : '📉'} <b>ผลตอบแทน (PnL):</b> ${isWin ? '+' 
 
       // Check if we have already opened a trade on this exact confirmed candle bar
       if (targetSide && lastTradedBarTimes.get(barKey) !== confirmedCandle.time) {
-        const tradeUsdt = calculateOrderSize(config, serverState.paperAccount);
+        const tradeUsdt = config.mode === 'BINANCE_LIVE'
+          ? (config.tradeAmountUsdt && config.tradeAmountUsdt >= 5 ? config.tradeAmountUsdt : 20)
+          : calculateOrderSize(config, serverState.paperAccount);
+
         const lev = Math.min(Math.max(1, config.leverage || 1), 10);
-        if (tradeUsdt >= 10 && serverState.paperAccount.usdtBalance >= tradeUsdt) {
+        const canExecute = config.mode === 'PAPER'
+          ? (tradeUsdt >= 5 && serverState.paperAccount.usdtBalance >= tradeUsdt)
+          : (tradeUsdt >= 5);
+
+        if (canExecute) {
           const notionalValue = tradeUsdt * lev;
           const coinAmount = notionalValue / currentPrice;
           const liqPrice = targetSide === 'LONG'
             ? currentPrice * (1 - 0.9 / lev)
             : currentPrice * (1 + 0.9 / lev);
 
-          serverState.paperAccount.usdtBalance -= tradeUsdt;
+          if (config.mode === 'PAPER') {
+            serverState.paperAccount.usdtBalance -= tradeUsdt;
+          }
 
           const newPos: PaperPosition = {
             symbol: sym,
@@ -771,6 +780,8 @@ ${isWin ? '📈' : '📉'} <b>ผลตอบแทน (PnL):</b> ${isWin ? '+' 
           serverState.paperAccount.activePositions.push(newPos);
           lastTradedBarTimes.set(barKey, confirmedCandle.time);
 
+          let liveOrderId: string | number | undefined;
+
           // If Live Mode and API keys are present, execute live entry on Binance
           if (config.mode === 'BINANCE_LIVE' && serverState.liveApiKeys) {
             try {
@@ -781,9 +792,10 @@ ${isWin ? '📈' : '📉'} <b>ผลตอบแทน (PnL):</b> ${isWin ? '+' 
                 leverage: lev,
               });
               if (liveEntryRes.success) {
-                addServerLog(`⚡ [LIVE BINANCE] เปิดสัญญาจริง ${targetSide} ${sym} สำเร็จ (OrderId: ${liveEntryRes.orderId})`);
+                liveOrderId = liveEntryRes.orderId;
+                addServerLog(`⚡ [LIVE AUTO 24/7] เปิดสัญญาจริง ${targetSide} ${sym} สำเร็จ (OrderId: ${liveOrderId})`);
               } else {
-                addServerLog(`⚠️ [LIVE BINANCE] เปิดสัญญาจริง ${sym} ไม่สำเร็จ: ${liveEntryRes.error}`);
+                addServerLog(`⚠️ [LIVE AUTO 24/7 FAILED] เปิดสัญญาจริง ${sym} ไม่สำเร็จ: ${liveEntryRes.error}`);
               }
             } catch (err: any) {
               console.error('Live entry order error:', err);
@@ -799,18 +811,24 @@ ${isWin ? '📈' : '📉'} <b>ผลตอบแทน (PnL):</b> ${isWin ? '+' 
             amount: coinAmount,
             usdtValue: notionalValue,
             leverage: lev,
-            reason: `[Cloud 24/7 Entry ${lev}x] CDC ${confirmedCandle.colorNameTh} (${targetSide}) [Confirmed Bar]`,
+            reason: config.mode === 'BINANCE_LIVE'
+              ? `[Live Auto 24/7 ${lev}x] สัญญาณ CDC ${confirmedCandle.colorNameTh} (${targetSide}) ${liveOrderId ? `[OrderId: ${liveOrderId}]` : ''}`
+              : `[Cloud 24/7 Entry ${lev}x] CDC ${confirmedCandle.colorNameTh} (${targetSide}) [Confirmed Bar]`,
             timestamp: Date.now(),
             mode: config.mode,
           };
 
           serverState.tradeHistory.unshift(trade);
+          if (serverState.tradeHistory.length > 500) {
+            serverState.tradeHistory = serverState.tradeHistory.slice(0, 500);
+          }
+
           addServerLog(`🚀 [SERVER 24/7 OPEN ${targetSide} ${lev}x] ${sym} @ $${currentPrice} | ทุน $${tradeUsdt.toFixed(2)} USDT (มูลค่าสัญญา $${notionalValue.toFixed(2)}) | สัญญาณปิดแท่ง ${confirmedCandle.colorNameTh}`);
           saveServerState();
 
           // Telegram Alert for Open Order
           const timeStr = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
-          const tgOpenMsg = `🟢 <b>[CDC Action Zone Bot] สั่งเปิดออเดอร์ใหม่!</b>
+          const tgOpenMsg = `🟢 <b>[CDC Action Zone Bot] สั่งเปิดออเดอร์อัตโนมัติ (${config.mode === 'BINANCE_LIVE' ? 'พอร์ตจริง Binance 🟢' : 'พอร์ตจำลอง 🗂️'})</b>
 ━━━━━━━━━━━━━━━━━━━━
 🪙 <b>เหรียญ:</b> #${sym}
 📊 <b>สัญญาณปิดแท่ง:</b> CDC ${confirmedCandle.colorNameTh} (${targetSide} ${lev}x)
@@ -820,7 +838,7 @@ ${isWin ? '📈' : '📉'} <b>ผลตอบแทน (PnL):</b> ${isWin ? '+' 
 💵 <b>เงินทุน:</b> $${tradeUsdt.toFixed(2)} USDT (มูลค่า $${notionalValue.toFixed(2)})
 🎯 <b>Take Profit:</b> +${config.takeProfitPercent}%
 🛡 <b>Stop Loss:</b> -${config.stopLossPercent}%
-💼 <b>ยอดพอร์ตคงเหลือ:</b> $${serverState.paperAccount.usdtBalance.toFixed(2)} USDT
+${liveOrderId ? `🆔 <b>Order ID:</b> <code>${liveOrderId}</code>\n` : ''}💼 <b>ยอดพอร์ตคงเหลือ:</b> $${serverState.paperAccount.usdtBalance.toFixed(2)} USDT
 🕒 <b>เวลา:</b> ${timeStr}`;
           sendTelegramNotification(tgOpenMsg, 'BUY');
         }
@@ -1132,6 +1150,37 @@ app.post('/api/bot/reset-paper', (req, res) => {
   addServerLog('🔄 รีเซ็ตพอร์ตจำลอง (Paper Account) เป็น $10,000 USDT เรียบร้อยแล้ว');
   saveServerState();
   return res.json({ success: true });
+});
+
+// 8. Binance API Keys Storage
+app.post('/api/binance/keys', (req, res) => {
+  try {
+    const { apiKey, apiSecret, isTestnet, marketType = 'FUTURES', marginType = 'ISOLATED' } = req.body;
+    serverState.liveApiKeys = {
+      apiKey: String(apiKey || '').trim(),
+      apiSecret: String(apiSecret || '').trim(),
+      isTestnet: !!isTestnet,
+      marketType,
+      marginType,
+    };
+    saveServerState();
+    addServerLog(`🔑 [BINANCE KEYS] อัปเดต API Key บนคลาวด์เรียบร้อย (${isTestnet ? 'Testnet' : 'Live'} | ${marketType})`);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: sanitizeErrorMessage(err) });
+  }
+});
+
+app.get('/api/binance/keys', (req, res) => {
+  if (!serverState.liveApiKeys) {
+    return res.json({ configured: false });
+  }
+  return res.json({
+    configured: true,
+    isTestnet: serverState.liveApiKeys.isTestnet,
+    marketType: serverState.liveApiKeys.marketType,
+    marginType: serverState.liveApiKeys.marginType,
+  });
 });
 
 // ==================== TELEGRAM CONFIG & TEST ENDPOINTS ====================
