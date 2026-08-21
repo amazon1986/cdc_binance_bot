@@ -1266,6 +1266,313 @@ app.post('/api/binance/futures/order', orderLimiter, async (req, res) => {
   }
 });
 
+// Binance Futures Close Position Proxy Endpoint (Market ReduceOnly)
+app.post('/api/binance/futures/close-position', orderLimiter, async (req, res) => {
+  try {
+    const { apiKey, apiSecret, isTestnet, symbol: rawSymbol, side: rawSide, quantity } = req.body;
+
+    if (!apiKey || !apiSecret) {
+      return res.status(400).json({ error: 'Invalid API credentials' });
+    }
+
+    const symbol = sanitizeSymbol(rawSymbol);
+    if (!symbol) return res.status(400).json({ error: 'Invalid symbol format' });
+
+    const qty = parseFloat(quantity);
+    if (isNaN(qty) || qty <= 0) return res.status(400).json({ error: 'Invalid quantity' });
+
+    // If currently LONG, we must SELL to close. If currently SHORT, we must BUY to close.
+    const posSide = String(rawSide).toUpperCase();
+    const orderSide = posSide === 'LONG' || posSide === 'BUY' ? 'SELL' : 'BUY';
+
+    const baseUrl = isTestnet
+      ? 'https://testnet.binancefuture.com/fapi/v1'
+      : 'https://fapi.binance.com/fapi/v1';
+
+    const { timestamp, recvWindow } = await getBinanceTimestamp(baseUrl);
+    const queryParts = [
+      `symbol=${symbol}`,
+      `side=${orderSide}`,
+      `type=MARKET`,
+      `quantity=${qty}`,
+      `reduceOnly=true`,
+      `recvWindow=${recvWindow}`,
+      `timestamp=${timestamp}`,
+    ];
+
+    const queryString = queryParts.join('&');
+    const signedQuery = buildBinanceSignedQuery(queryString, apiSecret);
+
+    const response = await fetch(`${baseUrl}/order?${signedQuery}`, {
+      method: 'POST',
+      headers: { 'X-MBX-APIKEY': apiKey },
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      return res.status(response.status).json({ error: data.msg || 'Failed to close Futures position' });
+    }
+
+    addServerLog(`⚡ ปิดสัญญาจริง Binance Futures: ${symbol} (${orderSide} ${qty}) สำเร็จ`);
+    return res.json({ success: true, order: data });
+  } catch (error: any) {
+    return res.status(500).json({ error: sanitizeErrorMessage(error) });
+  }
+});
+
+// Binance Live Trade History & Income Proxy Endpoint
+app.post('/api/binance/history', async (req, res) => {
+  try {
+    const {
+      apiKey,
+      apiSecret,
+      isTestnet,
+      symbol: rawSymbol,
+      marketType = 'FUTURES',
+      limit = 100,
+    } = req.body;
+
+    if (!apiKey || !apiSecret) {
+      return res.status(400).json({ error: 'Invalid API credentials' });
+    }
+
+    const symbol = rawSymbol ? sanitizeSymbol(rawSymbol) : null;
+    const historyLimit = Math.min(Math.max(10, parseInt(String(limit || 100), 10)), 500);
+
+    if (marketType === 'FUTURES') {
+      const fapiBaseV1 = isTestnet
+        ? 'https://testnet.binancefuture.com/fapi/v1'
+        : 'https://fapi.binance.com/fapi/v1';
+      const fapiBaseV2 = isTestnet
+        ? 'https://testnet.binancefuture.com/fapi/v2'
+        : 'https://fapi.binance.com/fapi/v2';
+
+      const { timestamp, recvWindow } = await getBinanceTimestamp(fapiBaseV1);
+
+      // 1. Fetch Realized PnL & Income history from /fapi/v1/income
+      let incomeQueryParts = [
+        `recvWindow=${recvWindow}`,
+        `timestamp=${timestamp}`,
+        `limit=${historyLimit}`,
+      ];
+      if (symbol) {
+        incomeQueryParts.unshift(`symbol=${symbol}`);
+      }
+
+      const signedIncomeQuery = buildBinanceSignedQuery(incomeQueryParts.join('&'), apiSecret);
+      const incomePromise = fetch(`${fapiBaseV1}/income?${signedIncomeQuery}`, {
+        headers: { 'X-MBX-APIKEY': apiKey },
+      }).then(async (r) => (r.ok ? r.json() : []));
+
+      // 2. Fetch Active Positions from /fapi/v2/account
+      const signedAccountQuery = buildBinanceSignedQuery(`recvWindow=${recvWindow}&timestamp=${timestamp}`, apiSecret);
+      const accountPromise = fetch(`${fapiBaseV2}/account?${signedAccountQuery}`, {
+        headers: { 'X-MBX-APIKEY': apiKey },
+      }).then(async (r) => (r.ok ? r.json() : { positions: [] }));
+
+      // 3. Fetch Specific Symbol User Trades if symbol is provided
+      let userTradesPromise: Promise<any[]> = Promise.resolve([]);
+      if (symbol) {
+        const userTradesQuery = buildBinanceSignedQuery(
+          `symbol=${symbol}&limit=${historyLimit}&recvWindow=${recvWindow}&timestamp=${timestamp}`,
+          apiSecret
+        );
+        userTradesPromise = fetch(`${fapiBaseV1}/userTrades?${userTradesQuery}`, {
+          headers: { 'X-MBX-APIKEY': apiKey },
+        }).then(async (r) => (r.ok ? r.json() : []));
+      }
+
+      const [incomeData, accountData, userTradesData] = await Promise.all([
+        incomePromise,
+        accountPromise,
+        userTradesPromise,
+      ]);
+
+      // Extract Active Live Positions (positionAmt != 0)
+      const rawPositions = Array.isArray(accountData?.positions) ? accountData.positions : [];
+      const livePositions = rawPositions
+        .filter((p: any) => parseFloat(p.positionAmt) !== 0)
+        .map((p: any) => {
+          const amt = parseFloat(p.positionAmt);
+          const entryPrice = parseFloat(p.entryPrice);
+          const unPnl = parseFloat(p.unrealizedProfit);
+          const initMargin = parseFloat(p.initialMargin || p.positionInitialMargin || '0');
+          const pnlPercent = initMargin > 0 ? (unPnl / initMargin) * 100 : 0;
+          return {
+            symbol: p.symbol,
+            positionSide: p.positionSide || (amt > 0 ? 'LONG' : 'SHORT'),
+            positionAmt: amt,
+            entryPrice,
+            markPrice: entryPrice > 0 ? entryPrice * (1 + unPnl / (Math.abs(amt) * entryPrice || 1)) : 0,
+            unrealizedProfit: unPnl,
+            initialMargin: initMargin,
+            leverage: parseInt(p.leverage || '1', 10),
+            isolated: p.isolated ?? true,
+            pnlPercent,
+          };
+        });
+
+      // Build unified trade items
+      const trades: any[] = [];
+      const tradeIdSet = new Set<string>();
+
+      // If userTrades available, add them
+      if (Array.isArray(userTradesData)) {
+        for (const t of userTradesData) {
+          const id = `trade_${t.id || t.orderId}_${t.time}`;
+          if (tradeIdSet.has(id)) continue;
+          tradeIdSet.add(id);
+
+          const realizedPnl = parseFloat(t.realizedPnl || '0');
+          const isBuyer = t.buyer === true || t.side === 'BUY';
+          const pnlPos = realizedPnl !== 0;
+
+          let displaySide = t.side;
+          if (pnlPos) {
+            displaySide = isBuyer ? 'CLOSE_SHORT' : 'CLOSE_LONG';
+          } else {
+            displaySide = isBuyer ? 'LONG' : 'SHORT';
+          }
+
+          trades.push({
+            id: String(t.id || t.orderId),
+            orderId: t.orderId,
+            symbol: t.symbol,
+            side: displaySide,
+            price: parseFloat(t.price),
+            qty: parseFloat(t.qty),
+            quoteQty: parseFloat(t.quoteQty || (parseFloat(t.price) * parseFloat(t.qty)).toFixed(4)),
+            realizedPnl: realizedPnl,
+            commission: parseFloat(t.commission || '0'),
+            commissionAsset: t.commissionAsset || 'USDT',
+            time: Number(t.time),
+            marketType: 'FUTURES',
+            positionSide: t.positionSide,
+            reason: pnlPos ? (realizedPnl >= 0 ? 'ทำกำไร (Take Profit)' : 'ตัดขาดทุน (Stop Loss)') : 'ส่งคำสั่งเปิดโพซิชัน',
+          });
+        }
+      }
+
+      // Process Income Data (Realized PnL & Funding)
+      if (Array.isArray(incomeData)) {
+        for (const inc of incomeData) {
+          const tranId = `income_${inc.tranId || inc.tradeId || inc.time}`;
+          if (tradeIdSet.has(tranId)) continue;
+          tradeIdSet.add(tranId);
+
+          const incomeVal = parseFloat(inc.income || '0');
+          const isPnl = inc.incomeType === 'REALIZED_PNL';
+          const isFunding = inc.incomeType === 'FUNDING_FEE';
+          const isCommission = inc.incomeType === 'COMMISSION';
+
+          let reason = inc.incomeType;
+          let side: string = incomeVal >= 0 ? 'CLOSE_LONG' : 'CLOSE_SHORT';
+
+          if (isPnl) {
+            reason = incomeVal >= 0 ? 'กำไรปิดสัญญา (Realized PnL)' : 'ขาดทุนปิดสัญญา (Realized Loss)';
+            side = incomeVal >= 0 ? 'CLOSE_LONG' : 'CLOSE_SHORT';
+          } else if (isFunding) {
+            reason = `ค่าธรรมเนียม Funding Rate (${incomeVal >= 0 ? '+' : ''}${incomeVal.toFixed(4)} ${inc.asset})`;
+            side = 'FUNDING';
+          } else if (isCommission) {
+            reason = `ค่าธรรมเนียม Commission (${incomeVal.toFixed(4)} ${inc.asset})`;
+            side = 'FEE';
+          }
+
+          trades.push({
+            id: String(inc.tranId || inc.tradeId || inc.time),
+            orderId: inc.tradeId,
+            symbol: inc.symbol || 'USDT',
+            side,
+            price: 0,
+            qty: 0,
+            quoteQty: Math.abs(incomeVal),
+            realizedPnl: isPnl ? incomeVal : undefined,
+            commission: isCommission ? Math.abs(incomeVal) : undefined,
+            commissionAsset: inc.asset || 'USDT',
+            time: Number(inc.time),
+            marketType: 'FUTURES',
+            reason,
+          });
+        }
+      }
+
+      // Sort by time descending
+      trades.sort((a, b) => b.time - a.time);
+
+      // Compute statistics
+      let totalRealizedPnl = 0;
+      let winCount = 0;
+      let lossCount = 0;
+
+      for (const tr of trades) {
+        if (tr.realizedPnl !== undefined && tr.realizedPnl !== 0) {
+          totalRealizedPnl += tr.realizedPnl;
+          if (tr.realizedPnl > 0) winCount++;
+          else if (tr.realizedPnl < 0) lossCount++;
+        }
+      }
+
+      return res.json({
+        success: true,
+        trades,
+        livePositions,
+        totalRealizedPnl,
+        winCount,
+        lossCount,
+      });
+    } else {
+      // SPOT Trade History
+      const spotBase = isTestnet
+        ? 'https://testnet.binance.vision/api/v3'
+        : 'https://api.binance.com/api/v3';
+
+      const { timestamp, recvWindow } = await getBinanceTimestamp(spotBase);
+      const querySymbol = symbol || 'BTCUSDT';
+      const queryString = `symbol=${querySymbol}&limit=${historyLimit}&recvWindow=${recvWindow}&timestamp=${timestamp}`;
+      const signedQuery = buildBinanceSignedQuery(queryString, apiSecret);
+
+      const spotRes = await fetch(`${spotBase}/myTrades?${signedQuery}`, {
+        headers: { 'X-MBX-APIKEY': apiKey },
+      });
+
+      const spotData = await spotRes.json();
+      if (!spotRes.ok) {
+        return res.status(spotRes.status).json({ error: spotData.msg || 'Binance Spot myTrades failed' });
+      }
+
+      const trades = (Array.isArray(spotData) ? spotData : []).map((t: any) => ({
+        id: String(t.id || t.orderId),
+        orderId: t.orderId,
+        symbol: t.symbol,
+        side: t.isBuyer ? 'BUY' : 'SELL',
+        price: parseFloat(t.price),
+        qty: parseFloat(t.qty),
+        quoteQty: parseFloat(t.quoteQty || (parseFloat(t.price) * parseFloat(t.qty)).toFixed(4)),
+        commission: parseFloat(t.commission || '0'),
+        commissionAsset: t.commissionAsset || 'BNB',
+        time: Number(t.time),
+        marketType: 'SPOT',
+        reason: t.isBuyer ? 'ซื้อ Spot (Buy)' : 'ขาย Spot (Sell)',
+      }));
+
+      trades.sort((a: any, b: any) => b.time - a.time);
+
+      return res.json({
+        success: true,
+        trades,
+        livePositions: [],
+        totalRealizedPnl: 0,
+        winCount: 0,
+        lossCount: 0,
+      });
+    }
+  } catch (error: any) {
+    return res.status(500).json({ error: sanitizeErrorMessage(error) });
+  }
+});
+
+
 // ==================== AI ANALYST (GEMINI) ====================
 
 app.post('/api/ai/analyze', async (req, res) => {

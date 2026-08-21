@@ -266,3 +266,32 @@ export interface BinanceWalletData {
   lastUpdated: number;
 }
 
+export interface BinanceLiveTradeItem {
+  id: string | number;
+  orderId?: string | number;
+  symbol: string;
+  side: 'BUY' | 'SELL' | 'LONG' | 'SHORT' | 'CLOSE_LONG' | 'CLOSE_SHORT';
+  price: number;
+  qty: number;
+  quoteQty: number; // USDT value
+  realizedPnl?: number;
+  commission?: number;
+  commissionAsset?: string;
+  time: number;
+  marketType: 'SPOT' | 'FUTURES';
+  status?: string;
+  reason?: string;
+  positionSide?: string;
+}
+
+export interface BinanceLiveHistoryResponse {
+  success: boolean;
+  trades: BinanceLiveTradeItem[];
+  livePositions?: FuturesPositionItem[];
+  totalRealizedPnl?: number;
+  winCount?: number;
+  lossCount?: number;
+  error?: string;
+}
+
+

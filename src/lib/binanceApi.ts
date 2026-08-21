@@ -574,3 +574,99 @@ export async function fetchFullBinanceWallet(keys: {
   }
 }
 
+/**
+ * Fetches real trade history & closed PnL records from Binance Live API
+ */
+export async function fetchBinanceLiveTradeHistory(
+  keys: {
+    apiKey: string;
+    apiSecret: string;
+    isTestnet: boolean;
+    marketType?: 'SPOT' | 'FUTURES';
+  },
+  options?: {
+    symbol?: string;
+    limit?: number;
+  }
+): Promise<import('../types').BinanceLiveHistoryResponse> {
+  if (!keys.apiKey || !keys.apiSecret) {
+    return { success: false, trades: [], error: 'ยังไม่ได้ตั้งค่า Binance API Key' };
+  }
+
+  try {
+    const res = await fetch('/api/binance/history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        apiKey: keys.apiKey,
+        apiSecret: keys.apiSecret,
+        isTestnet: keys.isTestnet,
+        marketType: keys.marketType || 'FUTURES',
+        symbol: options?.symbol,
+        limit: options?.limit || 100,
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      return { success: false, trades: [], error: data.error || 'Failed to fetch live trade history' };
+    }
+
+    return {
+      success: true,
+      trades: data.trades || [],
+      livePositions: data.livePositions || [],
+      totalRealizedPnl: data.totalRealizedPnl || 0,
+      winCount: data.winCount || 0,
+      lossCount: data.lossCount || 0,
+    };
+  } catch (err: any) {
+    return { success: false, trades: [], error: err.message || 'Network error fetching trade history' };
+  }
+}
+
+/**
+ * Closes an open position on Binance Futures with a market ReduceOnly order
+ */
+export async function closeLiveBinancePosition(
+  keys: {
+    apiKey: string;
+    apiSecret: string;
+    isTestnet: boolean;
+  },
+  params: {
+    symbol: string;
+    side: 'LONG' | 'SHORT' | 'BUY' | 'SELL';
+    quantity: number;
+  }
+): Promise<{ success: boolean; order?: any; error?: string }> {
+  if (!keys.apiKey || !keys.apiSecret) {
+    return { success: false, error: 'ยังไม่ได้ตั้งค่า Binance API Key' };
+  }
+
+  try {
+    const res = await fetch('/api/binance/futures/close-position', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        apiKey: keys.apiKey,
+        apiSecret: keys.apiSecret,
+        isTestnet: keys.isTestnet,
+        symbol: params.symbol,
+        side: params.side,
+        quantity: params.quantity,
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok || data.error) {
+      return { success: false, error: data.error || 'Failed to close position on Binance' };
+    }
+
+    return { success: true, order: data.order };
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Network error sending close order' };
+  }
+}
+
+

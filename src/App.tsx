@@ -583,6 +583,14 @@ export default function App() {
             activePositions={paperAccount.activePositions}
             onClosePosition={handleCloseSpecificPosition}
             allTickers={allTickers}
+            binanceKeys={binanceKeys}
+            botConfig={botConfig}
+            onOpenSettings={() => setIsSettingsOpen(true)}
+            onSelectSymbol={(selectedSymbol) => {
+              handleSaveBotConfig({ ...botConfig, symbol: selectedSymbol });
+              setActiveTab('chart');
+              showToast(`เลือกเหรียญ ${selectedSymbol} ขึ้นชาร์ตเรียบร้อยแล้ว`, 'info');
+            }}
           />
         )}
       </main>
