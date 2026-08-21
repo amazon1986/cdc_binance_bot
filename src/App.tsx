@@ -9,6 +9,7 @@ import {
   PaperPosition,
   BinanceTicker24h,
   TelegramConfig,
+  BinanceWalletData,
 } from './types';
 import {
   getStoredBotConfig,
@@ -47,6 +48,7 @@ import {
   formatQuantityByStepSize,
   executeLiveBinanceOrder,
   fetchLiveBinanceUsdtBalance,
+  fetchFullBinanceWallet,
   formatCryptoPrice,
 } from './lib/binanceApi';
 import { calculateCDCActionZone, getCrossoverInfo } from './lib/cdcIndicator';
@@ -101,6 +103,10 @@ export default function App() {
   const [telegramConfig, setTelegramConfig] = useState<TelegramConfig>(getStoredTelegramConfig);
   const [tradeHistory, setTradeHistory] = useState<ExecutedTrade[]>(getStoredTradeHistory);
   const [botLogs, setBotLogs] = useState<string[]>(getStoredLogs);
+
+  // Live Binance Wallet State
+  const [liveWalletData, setLiveWalletData] = useState<BinanceWalletData | null>(null);
+  const [isLoadingLiveWallet, setIsLoadingLiveWallet] = useState(false);
 
   // Market & Kline State
   const [candles, setCandles] = useState<KlineData[]>([]);
@@ -214,15 +220,38 @@ export default function App() {
       }
     };
 
-
     syncServerState();
     const syncInterval = setInterval(syncServerState, 3500);
     return () => {
       isMounted = false;
       clearInterval(syncInterval);
     };
-  }, []);
+  }, [isTelegramModalOpen]);
 
+  // Live Wallet Refresh Handler
+  const refreshLiveWallet = useCallback(async () => {
+    if (!binanceKeys.apiKey || !binanceKeys.apiSecret) return;
+    setIsLoadingLiveWallet(true);
+    try {
+      const res = await fetchFullBinanceWallet(binanceKeys);
+      if (res.success && res.data) {
+        setLiveWalletData(res.data);
+      }
+    } catch (err) {
+      console.warn('Failed to refresh live wallet:', err);
+    } finally {
+      setIsLoadingLiveWallet(false);
+    }
+  }, [binanceKeys]);
+
+  // Auto-refresh live wallet every 10 seconds if API keys present
+  useEffect(() => {
+    if (binanceKeys.apiKey && binanceKeys.apiSecret) {
+      refreshLiveWallet();
+      const walletInterval = setInterval(refreshLiveWallet, 10000);
+      return () => clearInterval(walletInterval);
+    }
+  }, [binanceKeys, refreshLiveWallet]);
 
   // Initial Load & Polling Intervals
   useEffect(() => {
@@ -347,6 +376,7 @@ export default function App() {
 
     if (res.success) {
       showToast(`เปิดสัญญา Long ${botConfig.symbol} สำเร็จ (${botConfig.mode === 'BINANCE_LIVE' ? 'พอร์ตจริง Binance 🟢' : 'พอร์ตจำลอง 🗂️'})`, 'buy');
+      refreshLiveWallet();
       const data = await fetchBotServerState();
       if (data) {
         setPaperAccount(data.paperAccount);
@@ -392,6 +422,7 @@ export default function App() {
 
     if (res.success) {
       showToast(`เปิดสัญญา Short ${botConfig.symbol} สำเร็จ (${botConfig.mode === 'BINANCE_LIVE' ? 'พอร์ตจริง Binance 🟢' : 'พอร์ตจำลอง 🗂️'})`, 'sell');
+      refreshLiveWallet();
       const data = await fetchBotServerState();
       if (data) {
         setPaperAccount(data.paperAccount);
@@ -439,6 +470,7 @@ export default function App() {
 
     if (res.success) {
       showToast(`ปิดสัญญา ${sym} เรียบร้อยแล้ว`, 'info');
+      refreshLiveWallet();
       const data = await fetchBotServerState();
       if (data) {
         setPaperAccount(data.paperAccount);
@@ -526,6 +558,11 @@ export default function App() {
               onManualShort={handleManualShort}
               onManualSell={handleManualSell}
               botLogs={botLogs}
+              liveWallet={liveWalletData}
+              isLoadingLiveWallet={isLoadingLiveWallet}
+              onRefreshLiveWallet={refreshLiveWallet}
+              binanceKeys={binanceKeys}
+              onOpenSettings={() => setIsSettingsOpen(true)}
               onClearLogs={() => {
                 localStorage.removeItem('cdc_bot_logs_v2');
                 setBotLogs([]);

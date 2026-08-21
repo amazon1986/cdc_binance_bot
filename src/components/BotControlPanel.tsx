@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { BotConfig, PaperAccount, PaperPosition, ExecutedTrade, Timeframe } from '../types';
+import { BotConfig, PaperAccount, PaperPosition, ExecutedTrade, Timeframe, BinanceWalletData, BinanceApiKeys } from '../types';
 import { formatCryptoPrice, formatCryptoAmount } from '../lib/binanceApi';
 import {
   Play,
@@ -16,6 +16,9 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   Sparkles,
+  RefreshCw,
+  Wallet,
+  ExternalLink,
 } from 'lucide-react';
 
 interface BotControlPanelProps {
@@ -29,6 +32,11 @@ interface BotControlPanelProps {
   onManualSell: () => void;
   botLogs: string[];
   onClearLogs: () => void;
+  liveWallet?: BinanceWalletData | null;
+  isLoadingLiveWallet?: boolean;
+  onRefreshLiveWallet?: () => void;
+  binanceKeys?: BinanceApiKeys;
+  onOpenSettings?: () => void;
 }
 
 export const BotControlPanel: React.FC<BotControlPanelProps> = ({
@@ -42,6 +50,11 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
   onManualSell,
   botLogs,
   onClearLogs,
+  liveWallet,
+  isLoadingLiveWallet,
+  onRefreshLiveWallet,
+  binanceKeys,
+  onOpenSettings,
 }) => {
   const [configForm, setConfigForm] = useState<BotConfig>({ ...botConfig });
   const [isEditing, setIsEditing] = useState(false);
@@ -49,15 +62,46 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
   const [inputMode, setInputMode] = useState<'PERCENT' | 'FIXED'>('PERCENT');
   const [fixedUsdt, setFixedUsdt] = useState<number>(botConfig.tradeAmountUsdt || 20);
 
-  // Active position for current symbol
-  const activePos = paperAccount.activePositions.find((p) => p.symbol === botConfig.symbol);
+  const isLiveMode = botConfig.mode === 'BINANCE_LIVE';
+
+  // Live Position from Binance if in LIVE mode, else Paper Position
+  const livePos = isLiveMode ? liveWallet?.futuresPositions?.find((p) => p.symbol === botConfig.symbol) : null;
+  const paperPos = paperAccount.activePositions.find((p) => p.symbol === botConfig.symbol);
+
+  // Unified Active Position display
+  const activeDisplayPos = isLiveMode && livePos
+    ? {
+        symbol: livePos.symbol,
+        side: (livePos.positionSide || (livePos.positionAmt > 0 ? 'LONG' : 'SHORT')) as 'LONG' | 'SHORT',
+        entryPrice: livePos.entryPrice,
+        markPrice: livePos.markPrice,
+        amount: Math.abs(livePos.positionAmt),
+        usdtInvested: livePos.initialMargin,
+        marginUsdt: livePos.initialMargin,
+        leverage: livePos.leverage,
+        currentPnlUsdt: livePos.unrealizedProfit,
+        currentPnlPercent: livePos.pnlPercent || 0,
+        liquidationPrice: livePos.liquidationPrice,
+        isLive: true,
+      }
+    : paperPos
+    ? {
+        ...paperPos,
+        markPrice: currentPrice,
+        isLive: false,
+      }
+    : null;
+
+  // Real available USDT in wallet
+  const liveAvailableUsdt = liveWallet?.futuresAssets?.find((a) => a.asset === 'USDT')?.availableBalance ?? liveWallet?.totalFuturesMarginUsd ?? 0;
+  const effectiveBalance = isLiveMode ? (liveAvailableUsdt > 0 ? liveAvailableUsdt : (liveWallet?.totalFuturesMarginUsd || 0)) : paperAccount.usdtBalance;
 
   // Computed Manual Trade USDT amount based on selected percentage or fixed amount
   const computedManualUsdt = inputMode === 'FIXED'
     ? Math.max(5, fixedUsdt)
-    : (botConfig.mode === 'BINANCE_LIVE' && paperAccount.usdtBalance <= 0)
-      ? Math.max(5, fixedUsdt)
-      : Math.max(5, (paperAccount.usdtBalance * manualPercent) / 100);
+    : effectiveBalance > 0
+      ? Math.max(5, (effectiveBalance * manualPercent) / 100)
+      : Math.max(5, fixedUsdt);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -246,33 +290,38 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
             </div>
           </div>
 
-          {activePos ? (
-            <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+          {/* Active Position Card */}
+          {activeDisplayPos ? (
+            <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3 shadow-inner">
               <div className="flex items-center justify-between">
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-slate-400 block">สถานะโพสิชันปัจจุบัน</span>
-                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-extrabold bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                      {activePos.leverage || 1}x Leverage
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-extrabold border ${
+                      activeDisplayPos.isLive
+                        ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
+                        : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+                    }`}>
+                      {activeDisplayPos.isLive ? '⚡ สัญญาจริง Binance' : '🗂️ พอร์ตจำลอง'} ({activeDisplayPos.leverage || 1}x)
                     </span>
                   </div>
-                  <span className={`text-lg font-extrabold font-mono ${activePos.side === 'SHORT' ? 'text-rose-400' : 'text-emerald-400'}`}>
-                    {activePos.side} {activePos.symbol}
+                  <span className={`text-lg font-black font-mono ${activeDisplayPos.side === 'SHORT' ? 'text-rose-400' : 'text-emerald-400'}`}>
+                    {activeDisplayPos.side} {activeDisplayPos.symbol}
                   </span>
                 </div>
                 <div className="text-right">
                   <span className="text-xs text-slate-400 block">กำไร/ขาดทุน (Unrealized PnL)</span>
                   <div
-                    className={`text-lg font-extrabold font-mono flex items-center justify-end ${
-                      activePos.currentPnlUsdt >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                    className={`text-lg font-black font-mono flex items-center justify-end ${
+                      activeDisplayPos.currentPnlUsdt >= 0 ? 'text-emerald-400' : 'text-rose-400'
                     }`}
                   >
-                    {activePos.currentPnlUsdt >= 0 ? (
+                    {activeDisplayPos.currentPnlUsdt >= 0 ? (
                       <ArrowUpRight className="w-5 h-5 mr-1" />
                     ) : (
                       <ArrowDownRight className="w-5 h-5 mr-1" />
                     )}
-                    ${activePos.currentPnlUsdt.toFixed(2)} ({activePos.currentPnlPercent.toFixed(2)}%)
+                    {activeDisplayPos.currentPnlUsdt >= 0 ? '+' : ''}${activeDisplayPos.currentPnlUsdt.toFixed(2)} ({activeDisplayPos.currentPnlPercent >= 0 ? '+' : ''}{activeDisplayPos.currentPnlPercent.toFixed(2)}%)
                   </div>
                 </div>
               </div>
@@ -280,22 +329,22 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-slate-800/80 text-xs font-mono">
                 <div>
                   <span className="text-slate-500 block text-[10px]">ราคาเข้า (Entry)</span>
-                  <span className="text-slate-200">{formatCryptoPrice(activePos.entryPrice)}</span>
+                  <span className="text-slate-200 font-bold">{formatCryptoPrice(activeDisplayPos.entryPrice)}</span>
                 </div>
                 <div>
                   <span className="text-slate-500 block text-[10px]">ทุนประกัน (Margin)</span>
-                  <span className="text-emerald-400 font-bold">${(activePos.marginUsdt || activePos.usdtInvested).toFixed(2)}</span>
+                  <span className="text-emerald-400 font-bold">${(activeDisplayPos.marginUsdt || activeDisplayPos.usdtInvested).toFixed(2)}</span>
                 </div>
                 <div>
-                  <span className="text-slate-500 block text-[10px]">มูลค่าสัญญา ({activePos.leverage || 1}x)</span>
-                  <span className="text-slate-200">
-                    ${(activePos.amount * currentPrice).toFixed(2)}
+                  <span className="text-slate-500 block text-[10px]">มูลค่าสัญญา ({activeDisplayPos.leverage || 1}x)</span>
+                  <span className="text-slate-200 font-bold">
+                    ${(activeDisplayPos.amount * (activeDisplayPos.markPrice || currentPrice)).toFixed(2)}
                   </span>
                 </div>
                 <div>
                   <span className="text-slate-500 block text-[10px]">ราคาล้างพอร์ต (Liq)</span>
                   <span className="text-rose-400 font-bold">
-                    {activePos.liquidationPrice ? formatCryptoPrice(activePos.liquidationPrice) : '-'}
+                    {activeDisplayPos.liquidationPrice ? formatCryptoPrice(activeDisplayPos.liquidationPrice) : '-'}
                   </span>
                 </div>
               </div>
@@ -312,30 +361,59 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
           {/* Quick Manual Order Execution Controls with Portfolio % Slider */}
           <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 space-y-3">
             <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
-              <label className="text-xs font-bold text-slate-200 flex items-center space-x-1.5">
+              <div className="flex items-center space-x-2">
                 <Zap className="w-4 h-4 text-amber-400" />
-                <span>ส่งคำสั่งซื้อขายเอง (Manual Trade Execution)</span>
-              </label>
-              <div className="flex items-center space-x-1 bg-slate-900 p-0.5 rounded-lg border border-slate-800 text-[11px]">
-                <button
-                  type="button"
-                  onClick={() => setInputMode('PERCENT')}
-                  className={`px-2 py-0.5 rounded font-semibold transition ${
-                    inputMode === 'PERCENT' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  % พอร์ต
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setInputMode('FIXED')}
-                  className={`px-2 py-0.5 rounded font-semibold transition ${
-                    inputMode === 'FIXED' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  จำนวน USDT ($)
-                </button>
+                <span className="text-xs font-bold text-slate-200">ส่งคำสั่งซื้อขายเอง (Manual Trade Execution)</span>
+                {isLiveMode && (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                    ⚡ Binance Live
+                  </span>
+                )}
               </div>
+              <div className="flex items-center space-x-2">
+                {isLiveMode && onRefreshLiveWallet && (
+                  <button
+                    type="button"
+                    onClick={onRefreshLiveWallet}
+                    disabled={isLoadingLiveWallet}
+                    className="p-1 text-slate-400 hover:text-emerald-400 rounded-lg hover:bg-slate-900 transition"
+                    title="ซิงก์ยอดเงินกระเป๋าจริง"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isLoadingLiveWallet ? 'animate-spin text-emerald-400' : ''}`} />
+                  </button>
+                )}
+                <div className="flex items-center space-x-1 bg-slate-900 p-0.5 rounded-lg border border-slate-800 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => setInputMode('PERCENT')}
+                    className={`px-2 py-0.5 rounded font-semibold transition ${
+                      inputMode === 'PERCENT' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    % พอร์ต
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInputMode('FIXED')}
+                    className={`px-2 py-0.5 rounded font-semibold transition ${
+                      inputMode === 'FIXED' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    จำนวน USDT ($)
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Wallet Balance Indicator */}
+            <div className="flex items-center justify-between text-xs bg-slate-900/60 px-3 py-2 rounded-lg border border-slate-800/60 font-mono">
+              <span className="text-slate-400 flex items-center gap-1.5">
+                <Wallet className="w-3.5 h-3.5 text-emerald-400" />
+                <span>{isLiveMode ? 'ยอดเงินพร้อมเทรดในกระเป๋าจริง (Binance):' : 'ยอดเงินพอร์ตจำลอง (Paper):'}</span>
+              </span>
+              <span className="font-extrabold text-emerald-400 text-sm">
+                ${effectiveBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT
+              </span>
             </div>
 
             {/* Slider / Fixed Input */}
@@ -345,7 +423,7 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
                   <span className="text-slate-400">สัดส่วนเงินทุน (% ของพอร์ต):</span>
                   <div className="text-right">
                     <span className="text-emerald-400 font-extrabold text-sm mr-1">{manualPercent}%</span>
-                    <span className="text-slate-300">(≈ ${computedManualUsdt.toFixed(2)} USDT)</span>
+                    <span className="text-slate-300 font-bold">(≈ ${computedManualUsdt.toFixed(2)} USDT)</span>
                   </div>
                 </div>
 
@@ -379,16 +457,34 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
             ) : (
               <div className="space-y-2 bg-slate-900/80 p-3 rounded-lg border border-slate-800/60">
                 <div className="flex items-center justify-between text-xs font-mono">
-                  <span className="text-slate-400">ระบุจำนวนเงิน (USDT):</span>
-                  <span className="text-emerald-400 font-extrabold text-sm">${computedManualUsdt.toFixed(0)}</span>
+                  <span className="text-slate-400">ระบุจำนวนเงินทุน (USDT):</span>
+                  <span className="text-emerald-400 font-extrabold text-sm">${computedManualUsdt.toFixed(2)} USDT</span>
                 </div>
                 <input
                   type="number"
                   min="5"
+                  step="5"
                   value={fixedUsdt}
-                  onChange={(e) => setFixedUsdt(Number(e.target.value))}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-white font-mono text-sm focus:border-emerald-500"
+                  onChange={(e) => setFixedUsdt(Math.max(5, parseFloat(e.target.value) || 5))}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-white font-mono text-sm font-bold focus:border-emerald-500"
+                  placeholder="เช่น 20 USDT"
                 />
+                <div className="flex items-center justify-between gap-1.5 pt-1">
+                  {[10, 20, 50, 100, 200].map((amt) => (
+                    <button
+                      key={amt}
+                      type="button"
+                      onClick={() => setFixedUsdt(amt)}
+                      className={`flex-1 py-1 rounded text-[11px] font-bold font-mono transition border ${
+                        fixedUsdt === amt
+                          ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50 shadow-sm'
+                          : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white hover:bg-slate-800'
+                      }`}
+                    >
+                      ${amt}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
 
@@ -396,10 +492,8 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
             <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-2.5 flex items-start space-x-2 text-[11px] text-blue-200">
               <Shield className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
               <div className="leading-normal">
-                <span className="font-bold text-blue-300 block">การเฝ้าระวังปิดสัญญาตามกลยุทธ์ CDC Action Zone V2:</span>
-                โพสิชัน Manual จะถูกเฝ้าระวังและปิดสัญญาอัตโนมัติเมื่อเกิดสัญญาณ CDC Exit Zone (
-                <span className="text-amber-300 font-semibold">โซนเหลือง/แดง</span> สำหรับ Long,{' '}
-                <span className="text-cyan-300 font-semibold">โซนฟ้า/เขียว</span> สำหรับ Short) หรือเมื่อถึง Stop Loss ({botConfig.stopLossPercent}%) / Take Profit ({botConfig.takeProfitPercent}%)
+                <span className="font-bold text-blue-300 block">การเฝ้าระวังปิดสัญญาตามกลยุทธ์ CDC Action Zone:</span>
+                คำสั่ง Manual จะถูกเฝ้าระวังและปิดสัญญาอัตโนมัติเมื่อเกิดสัญญาณ CDC Exit Zone หรือเมื่อถึง Stop Loss ({botConfig.stopLossPercent}%) / Take Profit ({botConfig.takeProfitPercent}%)
               </div>
             </div>
 
@@ -425,17 +519,17 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
                     type="button"
                     onClick={() => onManualShort(computedManualUsdt)}
                     className="flex items-center space-x-1 px-3.5 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold shadow transition"
-                    title={`เปิดสัญญา Short ด้วยเงิน $${computedManualUsdt.toFixed(2)} USDT (${manualPercent}%)`}
+                    title={`เปิดสัญญา Short ด้วยเงิน $${computedManualUsdt.toFixed(2)} USDT`}
                   >
                     <ArrowDownRight className="w-4 h-4" />
-                    <span>Manual SHORT ({manualPercent}%)</span>
+                    <span>Manual SHORT (${computedManualUsdt.toFixed(0)})</span>
                   </button>
                 )}
 
                 <button
                   type="button"
                   onClick={onManualSell}
-                  disabled={!activePos}
+                  disabled={!activeDisplayPos}
                   className="flex items-center space-x-1 px-3 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow transition disabled:opacity-40 disabled:cursor-not-allowed"
                   title="ปิดโพสิชันปัจจุบันทันที"
                 >
