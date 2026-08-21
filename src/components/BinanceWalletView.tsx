@@ -78,10 +78,10 @@ export const BinanceWalletView: React.FC<BinanceWalletViewProps> = ({
 
   useEffect(() => {
     loadWalletData();
-    // Auto-refresh every 15 seconds
+    // Auto-refresh every 30 seconds
     const interval = setInterval(() => {
       if (hasApiKeys) loadWalletData();
-    }, 15000);
+    }, 30000);
     return () => clearInterval(interval);
   }, [loadWalletData, hasApiKeys]);
 

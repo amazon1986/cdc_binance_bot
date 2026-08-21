@@ -124,9 +124,11 @@ export const MarketScanner: React.FC<MarketScannerProps> = ({ onSelectCoin }) =>
           });
         }
       } catch (err) {
-        console.warn(`Failed scanning ${sym}:`, err);
+        console.error(`Error scanning ${sym}:`, err);
       }
       setScanProgress(Math.round(((i + 1) / symbolsToScan.length) * 100));
+      // Small pacing delay between symbols to avoid burst REST weight
+      await new Promise((r) => setTimeout(r, 80));
     }
 
     setScanResults(results);

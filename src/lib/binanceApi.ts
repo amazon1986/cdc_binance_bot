@@ -2,9 +2,26 @@ import { KlineData, BinanceTicker24h, OrderBookData, Timeframe } from '../types'
 
 const BINANCE_PUBLIC_BASE = 'https://api.binance.com/api/v3';
 
+// In-Memory Client Cache to prevent duplicate REST requests
+interface CacheItem<T> {
+  data: T;
+  expiry: number;
+}
+const klineClientCache = new Map<string, CacheItem<KlineData[]>>();
+let tickerClientCache: CacheItem<BinanceTicker24h[]> | null = null;
+let clientBannedUntil = 0;
+
+export function getClientBannedUntil(): number {
+  return clientBannedUntil;
+}
+
+export function setClientBannedUntil(timestamp: number) {
+  clientBannedUntil = Math.max(clientBannedUntil, timestamp);
+}
+
 /**
  * Fetches historical Kline / Candlestick data from Binance.
- * Uses fallback to backend proxy if direct CORS fails.
+ * Uses client-side cache and fallback to backend proxy if direct CORS fails.
  */
 export async function fetchBinanceKlines(
   symbol = 'BTCUSDT',
@@ -12,11 +29,28 @@ export async function fetchBinanceKlines(
   limit = 1000
 ): Promise<KlineData[]> {
   const formattedSymbol = symbol.toUpperCase().replace('/', '');
+  const cacheKey = `${formattedSymbol}_${interval}_${limit}`;
+  const now = Date.now();
+
+  const cached = klineClientCache.get(cacheKey);
+  if (cached && now < cached.expiry) {
+    return cached.data;
+  }
+
+  // Check if currently under Rate Limit / Ban cooldown
+  if (now < clientBannedUntil) {
+    if (cached) return cached.data;
+    return [];
+  }
+
   const url = `${BINANCE_PUBLIC_BASE}/klines?symbol=${formattedSymbol}&interval=${interval}&limit=${limit}`;
 
   try {
     let response = await fetch(url);
     if (!response.ok) {
+      if (response.status === 418 || response.status === 429) {
+        setClientBannedUntil(now + 60000); // 1 min cooldown
+      }
       // Try backend proxy
       response = await fetch(`/api/binance/klines?symbol=${formattedSymbol}&interval=${interval}&limit=${limit}`);
     }
@@ -29,7 +63,7 @@ export async function fetchBinanceKlines(
 
     // Binance kline array format:
     // [ [openTime, open, high, low, close, volume, closeTime, quoteAssetVolume, tradesCount, ...], ... ]
-    return data.map((item: (string | number)[]) => ({
+    const result: KlineData[] = data.map((item: (string | number)[]) => ({
       time: Number(item[0]),
       open: parseFloat(item[1] as string),
       high: parseFloat(item[2] as string),
@@ -37,17 +71,22 @@ export async function fetchBinanceKlines(
       close: parseFloat(item[4] as string),
       volume: parseFloat(item[5] as string),
     }));
+
+    klineClientCache.set(cacheKey, { data: result, expiry: now + 10000 }); // 10s TTL
+    return result;
   } catch (error) {
     console.warn('Direct Binance fetch failed, attempting server proxy...', error);
     try {
       const proxyRes = await fetch(`/api/binance/klines?symbol=${formattedSymbol}&interval=${interval}&limit=${limit}`);
       if (proxyRes.ok) {
         const proxyData = await proxyRes.json();
+        klineClientCache.set(cacheKey, { data: proxyData, expiry: now + 10000 });
         return proxyData;
       }
     } catch (proxyErr) {
       console.error('Proxy fetch also failed:', proxyErr);
     }
+    if (cached) return cached.data;
     return [];
   }
 }
@@ -56,6 +95,15 @@ export async function fetchBinanceKlines(
  * Fetches 24h ticker info for a symbol or top symbols.
  */
 export async function fetchBinanceTicker24h(symbol?: string): Promise<BinanceTicker24h[]> {
+  const now = Date.now();
+  if (!symbol && tickerClientCache && now < tickerClientCache.expiry) {
+    return tickerClientCache.data;
+  }
+
+  if (now < clientBannedUntil && tickerClientCache) {
+    return tickerClientCache.data;
+  }
+
   try {
     const formattedSymbol = symbol ? symbol.toUpperCase().replace('/', '') : '';
     const url = formattedSymbol
@@ -64,6 +112,9 @@ export async function fetchBinanceTicker24h(symbol?: string): Promise<BinanceTic
 
     let response = await fetch(url);
     if (!response.ok) {
+      if (response.status === 418 || response.status === 429) {
+        setClientBannedUntil(now + 60000);
+      }
       response = await fetch(`/api/binance/ticker24h${formattedSymbol ? `?symbol=${formattedSymbol}` : ''}`);
     }
 
@@ -72,7 +123,7 @@ export async function fetchBinanceTicker24h(symbol?: string): Promise<BinanceTic
     const data = await response.json();
     const array = Array.isArray(data) ? data : [data];
 
-    return array.map((t: any) => ({
+    const result: BinanceTicker24h[] = array.map((t: any) => ({
       symbol: t.symbol,
       lastPrice: parseFloat(t.lastPrice),
       priceChangePercent: parseFloat(t.priceChangePercent),
@@ -81,8 +132,15 @@ export async function fetchBinanceTicker24h(symbol?: string): Promise<BinanceTic
       volume: parseFloat(t.volume),
       quoteVolume: parseFloat(t.quoteVolume),
     }));
+
+    if (!symbol) {
+      tickerClientCache = { data: result, expiry: now + 15000 }; // 15s TTL
+    }
+
+    return result;
   } catch (err) {
     console.error('Error fetching 24h ticker:', err);
+    if (tickerClientCache) return tickerClientCache.data;
     return [];
   }
 }

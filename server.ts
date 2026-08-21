@@ -222,14 +222,71 @@ function calculateOrderSize(config: BotConfig, account: PaperAccount): number {
   return Math.min(targetUsdt, account.usdtBalance);
 }
 
+// ==================== BINANCE RATE LIMIT CIRCUIT BREAKER & CACHING ====================
+let binanceBannedUntil = 0;
+let lastBanWarningTime = 0;
+
+interface ServerCacheItem<T> {
+  data: T;
+  expiry: number;
+}
+
+const serverKlineCache = new Map<string, ServerCacheItem<KlineData[]>>();
+let serverTickerCache: ServerCacheItem<any[]> | null = null;
+const serverDepthCache = new Map<string, ServerCacheItem<any>>();
+const serverExchangeInfoCache = new Map<string, ServerCacheItem<any>>();
+
+function handleBinanceRateLimitError(status: number, data: any, endpointName = 'API') {
+  if (status === 418 || status === 429) {
+    let banUntil = Date.now() + 60000; // default 1 min
+    const msg = typeof data === 'string' ? data : (data?.msg || JSON.stringify(data || ''));
+
+    // Extract timestamp from "banned until <timestamp>"
+    const match = msg.match(/banned until (\d+)/i);
+    if (match && match[1]) {
+      banUntil = parseInt(match[1], 10);
+    }
+
+    binanceBannedUntil = Math.max(binanceBannedUntil, banUntil);
+    const now = Date.now();
+    if (now - lastBanWarningTime > 15000) {
+      lastBanWarningTime = now;
+      const waitSeconds = Math.max(0, Math.ceil((binanceBannedUntil - now) / 1000));
+      const banDateStr = new Date(binanceBannedUntil).toLocaleTimeString('th-TH', { timeZone: 'Asia/Bangkok' });
+      addServerLog(`⚠️ [BINANCE RATE LIMIT / IP BAN] ตรวจพบการจำกัดคำขอ (HTTP ${status}) จาก Binance (${endpointName}): พักการส่งคำขอชั่วคราว ${waitSeconds} วินาที (จนถึง ${banDateStr}) เพื่อป้องกันการถูกต่อเวลาแบน`);
+      console.warn(`[Binance Rate Limit] IP Banned until ${binanceBannedUntil} (${waitSeconds}s remaining)`);
+    }
+  }
+}
+
 async function fetchKlinesDirect(symbol: string, interval: string, limit = 300): Promise<KlineData[]> {
+  const cacheKey = `${symbol}_${interval}_${limit}`;
+  const now = Date.now();
+  const cached = serverKlineCache.get(cacheKey);
+  if (cached && now < cached.expiry) {
+    return cached.data;
+  }
+
+  if (now < binanceBannedUntil) {
+    if (cached) return cached.data;
+    return [];
+  }
+
   try {
     const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
     const res = await fetch(url);
-    if (!res.ok) return [];
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      handleBinanceRateLimitError(res.status, errText, `klines ${symbol}`);
+      if (cached) return cached.data;
+      return [];
+    }
     const data = await res.json();
-    if (!Array.isArray(data)) return [];
-    return data.map((d: any) => ({
+    if (!Array.isArray(data)) {
+      if (cached) return cached.data;
+      return [];
+    }
+    const result: KlineData[] = data.map((d: any) => ({
       time: Math.floor(d[0] / 1000),
       open: parseFloat(d[1]),
       high: parseFloat(d[2]),
@@ -237,7 +294,11 @@ async function fetchKlinesDirect(symbol: string, interval: string, limit = 300):
       close: parseFloat(d[4]),
       volume: parseFloat(d[5]),
     }));
+
+    serverKlineCache.set(cacheKey, { data: result, expiry: now + 20000 }); // 20s TTL
+    return result;
   } catch (err) {
+    if (cached) return cached.data;
     return [];
   }
 }
@@ -517,14 +578,25 @@ async function runServerBotCycle() {
   const config = serverState.botConfig;
   if (!config.isActive) return;
 
+  const now = Date.now();
+  if (now < binanceBannedUntil) {
+    const waitSec = Math.ceil((binanceBannedUntil - now) / 1000);
+    if (now - lastBanWarningTime > 20000) {
+      lastBanWarningTime = now;
+      addServerLog(`⏳ [CIRCUIT BREAKER] พักรอบการทำงานของบอทชั่วคราวเนื่องจากติด Rate Limit จาก Binance (เหลืออีก ${waitSec} วินาที)...`);
+    }
+    return;
+  }
+
   isCycleRunning = true;
   try {
     const dirMode = config.directionMode ?? 'LONG_ONLY';
     const isMultiScan = config.scanMode === 'MULTI_SCAN';
-    const symbolsToEvaluate = isMultiScan ? POPULAR_PAIRS.slice(0, 15) : [config.symbol];
+    const symbolsToEvaluate = isMultiScan ? POPULAR_PAIRS.slice(0, 12) : [config.symbol];
 
     for (const sym of symbolsToEvaluate) {
       if (!serverState.botConfig.isActive) break;
+      if (Date.now() < binanceBannedUntil) break;
 
       const rawCandles = await fetchKlinesDirect(sym, config.timeframe, 300);
       if (rawCandles.length < 30) continue;
@@ -843,18 +915,21 @@ ${liveOrderId ? `🆔 <b>Order ID:</b> <code>${liveOrderId}</code>\n` : ''}💼 
           sendTelegramNotification(tgOpenMsg, 'BUY');
         }
       }
+
+      // Small pacing delay between symbols to avoid burst
+      if (isMultiScan) {
+        await new Promise((r) => setTimeout(r, 200));
+      }
     }
   } catch (err) {
     console.error('Error in server bot cycle:', err);
-
-
   } finally {
     isCycleRunning = false;
   }
 }
 
-// Start continuous 24/7 background execution loop every 10 seconds
-setInterval(runServerBotCycle, 10000);
+// Start continuous 24/7 background execution loop every 20 seconds
+setInterval(runServerBotCycle, 20000);
 
 // Self-ping heartbeat every 10 minutes to prevent Render Free Tier from sleeping
 const RENDER_APP_URL = process.env.RENDER_EXTERNAL_URL;
@@ -879,6 +954,7 @@ app.get('/api/bot/state', (req, res) => {
     tradeHistory: serverState.tradeHistory,
     botLogs: serverState.botLogs,
     telegramConfig: serverState.telegramConfig,
+    bannedUntil: binanceBannedUntil,
     serverTime: Date.now(),
     isServerRunning: true,
   });
@@ -1277,10 +1353,28 @@ app.get('/api/binance/klines', async (req, res) => {
     if (!symbol) return res.status(400).json({ error: 'Invalid symbol format' });
     if (!VALID_INTERVALS.includes(interval)) return res.status(400).json({ error: 'Invalid interval' });
 
+    const cacheKey = `${symbol}_${interval}_${limit}`;
+    const now = Date.now();
+    const cached = serverKlineCache.get(cacheKey);
+    if (cached && now < cached.expiry) {
+      return res.json(cached.data);
+    }
+
+    if (now < binanceBannedUntil) {
+      if (cached) return res.json(cached.data);
+      return res.status(429).json({ error: 'Binance API is in rate limit cooldown', bannedUntil: binanceBannedUntil });
+    }
+
     const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
     const response = await fetch(url);
-    if (!response.ok) return res.status(response.status).json({ error: 'Binance API request failed' });
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      handleBinanceRateLimitError(response.status, errText, `klines ${symbol}`);
+      if (cached) return res.json(cached.data);
+      return res.status(response.status).json({ error: 'Binance API request failed', details: errText });
+    }
     const data = await response.json();
+    serverKlineCache.set(cacheKey, { data, expiry: now + 15000 });
     return res.json(data);
   } catch (error: any) {
     return res.status(500).json({ error: sanitizeErrorMessage(error) });
@@ -1293,12 +1387,30 @@ app.get('/api/binance/ticker24h', async (req, res) => {
     const symbol = rawSymbol ? sanitizeSymbol(rawSymbol) : null;
     if (rawSymbol && !symbol) return res.status(400).json({ error: 'Invalid symbol format' });
 
+    const now = Date.now();
+    if (!symbol && serverTickerCache && now < serverTickerCache.expiry) {
+      return res.json(serverTickerCache.data);
+    }
+
+    if (now < binanceBannedUntil) {
+      if (serverTickerCache) return res.json(serverTickerCache.data);
+      return res.status(429).json({ error: 'Binance API is in rate limit cooldown', bannedUntil: binanceBannedUntil });
+    }
+
     const url = symbol
       ? `https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`
       : `https://api.binance.com/api/v3/ticker/24hr`;
     const response = await fetch(url);
-    if (!response.ok) return res.status(response.status).json({ error: 'Ticker request failed' });
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      handleBinanceRateLimitError(response.status, errText, 'ticker24h');
+      if (serverTickerCache) return res.json(serverTickerCache.data);
+      return res.status(response.status).json({ error: 'Ticker request failed', details: errText });
+    }
     const data = await response.json();
+    if (!symbol) {
+      serverTickerCache = { data, expiry: now + 15000 }; // 15s TTL
+    }
     return res.json(data);
   } catch (error: any) {
     return res.status(500).json({ error: sanitizeErrorMessage(error) });
@@ -1312,10 +1424,28 @@ app.get('/api/binance/depth', async (req, res) => {
     const symbol = sanitizeSymbol(rawSymbol);
     if (!symbol) return res.status(400).json({ error: 'Invalid symbol format' });
 
+    const cacheKey = `${symbol}_${limit}`;
+    const now = Date.now();
+    const cached = serverDepthCache.get(cacheKey);
+    if (cached && now < cached.expiry) {
+      return res.json(cached.data);
+    }
+
+    if (now < binanceBannedUntil) {
+      if (cached) return res.json(cached.data);
+      return res.status(429).json({ error: 'Binance API is in rate limit cooldown' });
+    }
+
     const url = `https://api.binance.com/api/v3/depth?symbol=${symbol}&limit=${limit}`;
     const response = await fetch(url);
-    if (!response.ok) return res.status(response.status).json({ error: 'Depth request failed' });
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      handleBinanceRateLimitError(response.status, errText, 'depth');
+      if (cached) return res.json(cached.data);
+      return res.status(response.status).json({ error: 'Depth request failed' });
+    }
     const data = await response.json();
+    serverDepthCache.set(cacheKey, { data, expiry: now + 5000 }); // 5s TTL
     return res.json(data);
   } catch (error: any) {
     return res.status(500).json({ error: sanitizeErrorMessage(error) });
@@ -1329,14 +1459,32 @@ app.get('/api/binance/exchangeInfo', async (req, res) => {
     const symbol = rawSymbol ? sanitizeSymbol(rawSymbol) : null;
     if (rawSymbol && !symbol) return res.status(400).json({ error: 'Invalid symbol format' });
 
+    const cacheKey = `${symbol || 'ALL'}_${isTestnet}`;
+    const now = Date.now();
+    const cached = serverExchangeInfoCache.get(cacheKey);
+    if (cached && now < cached.expiry) {
+      return res.json(cached.data);
+    }
+
+    if (now < binanceBannedUntil) {
+      if (cached) return res.json(cached.data);
+      return res.status(429).json({ error: 'Binance API is in rate limit cooldown' });
+    }
+
     const baseUrl = isTestnet
       ? 'https://testnet.binance.vision/api/v3'
       : 'https://api.binance.com/api/v3';
 
     const url = symbol ? `${baseUrl}/exchangeInfo?symbol=${symbol}` : `${baseUrl}/exchangeInfo`;
     const response = await fetch(url);
-    if (!response.ok) return res.status(response.status).json({ error: 'ExchangeInfo request failed' });
+    if (!response.ok) {
+      const errText = await response.text().catch(() => '');
+      handleBinanceRateLimitError(response.status, errText, 'exchangeInfo');
+      if (cached) return res.json(cached.data);
+      return res.status(response.status).json({ error: 'ExchangeInfo request failed' });
+    }
     const data = await response.json();
+    serverExchangeInfoCache.set(cacheKey, { data, expiry: now + 300000 }); // 5 min TTL
     return res.json(data);
   } catch (error: any) {
     return res.status(500).json({ error: sanitizeErrorMessage(error) });

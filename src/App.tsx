@@ -50,7 +50,9 @@ import {
   fetchLiveBinanceUsdtBalance,
   fetchFullBinanceWallet,
   formatCryptoPrice,
+  getClientBannedUntil,
 } from './lib/binanceApi';
+import { subscribeAllMiniTickers, subscribeKline } from './lib/binanceWs';
 import { calculateCDCActionZone, getCrossoverInfo } from './lib/cdcIndicator';
 import { Header } from './components/Header';
 import { CDCChart } from './components/CDCChart';
@@ -118,6 +120,7 @@ export default function App() {
 
   // Notification Toast State
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'buy' | 'sell' | 'info' } | null>(null);
+  const [bannedUntil, setBannedUntil] = useState<number>(0);
 
   const showToast = (text: string, type: 'buy' | 'sell' | 'info' = 'info') => {
     setToastMessage({ text, type });
@@ -129,7 +132,7 @@ export default function App() {
     price: 0,
   });
 
-  // 1. Fetch Market Candlestick Data (Separating Chart View from Bot Engine)
+  // 1. Fetch Market Candlestick Data (Chart View and Bot Engine)
   const loadCandles = useCallback(async () => {
     setIsLoadingCandles(true);
     try {
@@ -157,7 +160,7 @@ export default function App() {
     }
   }, [botConfig.symbol, botConfig.timeframe, chartTimeframe, botConfig.fastEmaPeriod, botConfig.slowEmaPeriod]);
 
-  // 2. Fetch All Crypto Ticker Prices for Header Running Ticker Tape
+  // 2. Fetch All Crypto Ticker Prices for Header Running Ticker Tape (REST Initial Load / Fallback)
   const loadTickers = useCallback(async () => {
     try {
       const raw = await fetchBinanceTicker24h();
@@ -187,6 +190,60 @@ export default function App() {
     }
   }, []);
 
+  // 3. Real-Time WebSocket Streaming for All Market Tickers (0 REST Weight)
+  useEffect(() => {
+    const unsubscribe = subscribeAllMiniTickers((tickers) => {
+      if (!tickers || tickers.length === 0) return;
+      const popularSet = new Set(POPULAR_PAIRS);
+      const filtered = tickers
+        .filter((t) => popularSet.has(t.symbol) || (t.symbol.endsWith('USDT') && !t.symbol.includes('UP') && !t.symbol.includes('DOWN')))
+        .sort((a, b) => {
+          const indexA = POPULAR_PAIRS.indexOf(a.symbol);
+          const indexB = POPULAR_PAIRS.indexOf(b.symbol);
+          if (indexA !== -1 && indexB !== -1) return indexA - indexB;
+          if (indexA !== -1) return -1;
+          if (indexB !== -1) return 1;
+          return b.quoteVolume - a.quoteVolume;
+        })
+        .slice(0, 30);
+
+      setAllTickers(filtered);
+
+      const btc = tickers.find((t) => t.symbol === 'BTCUSDT');
+      const eth = tickers.find((t) => t.symbol === 'ETHUSDT');
+      if (btc) setBtcPrice(btc.lastPrice);
+      if (eth) setEthPrice(eth.lastPrice);
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  // 4. Real-Time WebSocket Streaming for Active Candlestick (0 REST Weight)
+  useEffect(() => {
+    const unsubscribe = subscribeKline(botConfig.symbol, chartTimeframe, (update) => {
+      setCurrentPriceInfo({ symbol: update.symbol, price: update.candle.close });
+      setCandles((prev) => {
+        if (!prev || prev.length === 0) return prev;
+        const last = prev[prev.length - 1];
+        let nextCandles: KlineData[];
+        if (last.time === update.candle.time) {
+          nextCandles = [...prev.slice(0, -1), update.candle];
+        } else if (update.candle.time > last.time) {
+          nextCandles = [...prev, update.candle];
+        } else {
+          return prev;
+        }
+        return calculateCDCActionZone(nextCandles, botConfig.fastEmaPeriod, botConfig.slowEmaPeriod);
+      });
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [botConfig.symbol, chartTimeframe, botConfig.fastEmaPeriod, botConfig.slowEmaPeriod]);
+
   // Synchronize state with Cloud Server (every 3.5s) for 24/7 cross-device consistency
   useEffect(() => {
     let isMounted = true;
@@ -198,6 +255,12 @@ export default function App() {
           setPaperAccount(serverData.paperAccount);
           setTradeHistory(serverData.tradeHistory);
           setBotLogs(serverData.botLogs);
+          if ((serverData as any).bannedUntil) {
+            setBannedUntil((serverData as any).bannedUntil);
+          } else {
+            const clientBan = getClientBannedUntil();
+            if (clientBan > 0) setBannedUntil(clientBan);
+          }
           if (serverData.telegramConfig && !isTelegramModalOpen) {
             setTelegramConfig((prev) => {
               if (
@@ -244,22 +307,22 @@ export default function App() {
     }
   }, [binanceKeys]);
 
-  // Auto-refresh live wallet every 10 seconds if API keys present
+  // Auto-refresh live wallet every 30 seconds if API keys present
   useEffect(() => {
     if (binanceKeys.apiKey && binanceKeys.apiSecret) {
       refreshLiveWallet();
-      const walletInterval = setInterval(refreshLiveWallet, 10000);
+      const walletInterval = setInterval(refreshLiveWallet, 30000);
       return () => clearInterval(walletInterval);
     }
   }, [binanceKeys, refreshLiveWallet]);
 
-  // Initial Load & Polling Intervals
+  // Initial Load & Safe Fallback Intervals (60s instead of 8s/10s to prevent Rate Limits)
   useEffect(() => {
     loadCandles();
     loadTickers();
 
-    const candleInterval = setInterval(loadCandles, 10000);
-    const tickerInterval = setInterval(loadTickers, 8000);
+    const candleInterval = setInterval(loadCandles, 60000);
+    const tickerInterval = setInterval(loadTickers, 60000);
 
     return () => {
       clearInterval(candleInterval);
@@ -530,6 +593,29 @@ export default function App() {
 
       {/* Main Content Body */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 space-y-6">
+        {/* Rate Limit / IP Ban Safety Banner */}
+        {bannedUntil > Date.now() && (
+          <div className="bg-amber-950/40 border border-amber-500/50 text-amber-200 px-5 py-3.5 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg shadow-amber-950/20">
+            <div className="flex items-center space-x-3">
+              <span className="text-2xl">🛡️</span>
+              <div>
+                <div className="font-bold text-amber-100 flex items-center gap-2">
+                  <span>Binance Rate Limit Cooldown Active</span>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    Auto-Protection
+                  </span>
+                </div>
+                <div className="text-xs text-amber-300/80 mt-0.5">
+                  ระบบหยุดส่งคำขอ REST ไปยัง Binance ชั่วคราวเพื่อป้องกันการถูกขยายเวลาแบน (จะปลดอัตโนมัติใน {Math.max(0, Math.ceil((bannedUntil - Date.now()) / 1000))} วินาที) โดยราคายังอัปเดต Real-time ผ่าน WebSocket 🟢
+                </div>
+              </div>
+            </div>
+            <div className="text-xs font-mono bg-emerald-500/20 text-emerald-300 px-3 py-1.5 rounded-xl border border-emerald-500/30 shrink-0">
+              WebSocket Live 🟢
+            </div>
+          </div>
+        )}
+
         {activeTab === 'chart' && (
           <div className="space-y-6">
             <CDCChart

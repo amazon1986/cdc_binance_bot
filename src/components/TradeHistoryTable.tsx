@@ -117,7 +117,7 @@ export const TradeHistoryTable: React.FC<TradeHistoryTableProps> = ({
       loadLiveTradeHistory();
       const interval = setInterval(() => {
         if (hasApiKeys) loadLiveTradeHistory();
-      }, 15000);
+      }, 30000);
       return () => clearInterval(interval);
     }
   }, [historyMode, loadLiveTradeHistory, hasApiKeys]);
