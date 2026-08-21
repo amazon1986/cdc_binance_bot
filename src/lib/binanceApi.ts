@@ -386,3 +386,191 @@ export async function executeLiveBinanceFuturesOrder(params: {
   }
 }
 
+/**
+ * Fetches comprehensive Binance Wallet data (Spot Balances + Futures Assets & Positions)
+ * and calculates USD market valuation for every held coin.
+ */
+export async function fetchFullBinanceWallet(keys: {
+  apiKey: string;
+  apiSecret: string;
+  isTestnet: boolean;
+}): Promise<{ success: boolean; data?: import('../types').BinanceWalletData; error?: string }> {
+  if (!keys.apiKey || !keys.apiSecret) {
+    return { success: false, error: 'กรุณาระบุ API Key และ API Secret ในหน้าตั้งค่า' };
+  }
+
+  try {
+    // 1. Fetch Spot Account Balances
+    const spotPromise = fetch('/api/binance/account', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(keys),
+    }).then(async (res) => (res.ok ? res.json() : { error: (await res.json()).error || 'Spot failed' }));
+
+    // 2. Fetch Futures Account Balances & Positions
+    const futuresPromise = fetch('/api/binance/futures/account', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(keys),
+    }).then(async (res) => (res.ok ? res.json() : { error: (await res.json()).error || 'Futures failed' }));
+
+    // 3. Fetch 24h Tickers for Price Conversion
+    const tickersPromise = fetchBinanceTicker24h();
+
+    const [spotRes, futuresRes, tickers] = await Promise.all([spotPromise, futuresPromise, tickersPromise]);
+
+    const tickerMap = new Map<string, { price: number; change24h: number }>();
+    for (const t of tickers) {
+      tickerMap.set(t.symbol, { price: t.lastPrice, change24h: t.priceChangePercent });
+    }
+
+    const stableCoins = new Set(['USDT', 'USDC', 'FDUSD', 'BUSD', 'DAI', 'TUSD', 'USD']);
+
+    // Process Spot Balances
+    const rawBalances: { asset: string; free: string; locked: string }[] = spotRes.balances || [];
+    const spotBalances: import('../types').SpotBalanceItem[] = [];
+    let totalSpotUsd = 0;
+
+    for (const b of rawBalances) {
+      const free = parseFloat(b.free) || 0;
+      const locked = parseFloat(b.locked) || 0;
+      const total = free + locked;
+      if (total <= 0) continue;
+
+      let usdPrice = 0;
+      let priceChange24h = 0;
+
+      if (stableCoins.has(b.asset.toUpperCase())) {
+        usdPrice = 1.0;
+        priceChange24h = 0;
+      } else {
+        const symbolUsdt = `${b.asset.toUpperCase()}USDT`;
+        const symbolBtc = `${b.asset.toUpperCase()}BTC`;
+        const btcUsdt = tickerMap.get('BTCUSDT')?.price || 0;
+
+        if (tickerMap.has(symbolUsdt)) {
+          const tInfo = tickerMap.get(symbolUsdt)!;
+          usdPrice = tInfo.price;
+          priceChange24h = tInfo.change24h;
+        } else if (tickerMap.has(symbolBtc) && btcUsdt > 0) {
+          const tInfo = tickerMap.get(symbolBtc)!;
+          usdPrice = tInfo.price * btcUsdt;
+          priceChange24h = tInfo.change24h;
+        }
+      }
+
+      const usdValue = total * usdPrice;
+      totalSpotUsd += usdValue;
+
+      spotBalances.push({
+        asset: b.asset,
+        free,
+        locked,
+        total,
+        usdPrice,
+        usdValue,
+        priceChange24h,
+      });
+    }
+
+    // Sort by USD value descending
+    spotBalances.sort((a, b) => b.usdValue - a.usdValue);
+
+    // Calculate percent of spot portfolio
+    for (const item of spotBalances) {
+      item.percentOfPortfolio = totalSpotUsd > 0 ? (item.usdValue / totalSpotUsd) * 100 : 0;
+    }
+
+    // Process Futures Assets & Positions
+    const rawFuturesAssets: any[] = futuresRes.assets || [];
+    const rawFuturesPositions: any[] = futuresRes.positions || [];
+
+    const futuresAssets: import('../types').FuturesAssetItem[] = rawFuturesAssets.map((a) => ({
+      asset: a.asset,
+      walletBalance: parseFloat(a.walletBalance) || 0,
+      unrealizedProfit: parseFloat(a.unrealizedProfit) || 0,
+      marginBalance: parseFloat(a.marginBalance) || 0,
+      maintMargin: parseFloat(a.maintMargin) || 0,
+      initialMargin: parseFloat(a.initialMargin) || 0,
+      positionInitialMargin: parseFloat(a.positionInitialMargin) || 0,
+      openOrderInitialMargin: parseFloat(a.openOrderInitialMargin) || 0,
+      crossWalletBalance: parseFloat(a.crossWalletBalance) || 0,
+      crossUnPnl: parseFloat(a.crossUnPnl) || 0,
+      availableBalance: parseFloat(a.availableBalance) || 0,
+      maxWithdrawAmount: parseFloat(a.maxWithdrawAmount) || 0,
+    })).filter((a) => a.walletBalance > 0 || a.marginBalance > 0 || a.unrealizedProfit !== 0);
+
+    const futuresPositions: import('../types').FuturesPositionItem[] = rawFuturesPositions.map((p) => {
+      const positionAmt = parseFloat(p.positionAmt) || 0;
+      const entryPrice = parseFloat(p.entryPrice) || 0;
+      const markPrice = parseFloat(p.markPrice) || 0;
+      const unrealizedProfit = parseFloat(p.unRealizedProfit || p.unrealizedProfit) || 0;
+      const initialMargin = parseFloat(p.initialMargin) || 0;
+      const leverage = parseFloat(p.leverage) || 1;
+      const notional = Math.abs(positionAmt * markPrice);
+
+      let pnlPercent = 0;
+      if (initialMargin > 0) {
+        pnlPercent = (unrealizedProfit / initialMargin) * 100;
+      } else if (entryPrice > 0) {
+        pnlPercent = positionAmt >= 0
+          ? ((markPrice - entryPrice) / entryPrice) * 100 * leverage
+          : ((entryPrice - markPrice) / entryPrice) * 100 * leverage;
+      }
+
+      const liqPrice = parseFloat(p.liquidationPrice) || 0;
+
+      return {
+        symbol: p.symbol,
+        initialMargin,
+        maintMargin: parseFloat(p.maintMargin) || 0,
+        unrealizedProfit,
+        positionInitialMargin: parseFloat(p.positionInitialMargin) || 0,
+        openOrderInitialMargin: parseFloat(p.openOrderInitialMargin) || 0,
+        leverage,
+        isolated: !!p.isolated,
+        entryPrice,
+        markPrice,
+        breakEvenPrice: parseFloat(p.breakEvenPrice) || entryPrice,
+        positionSide: p.positionSide || (positionAmt >= 0 ? 'LONG' : 'SHORT'),
+        positionAmt,
+        notional,
+        liquidationPrice: liqPrice > 0 ? liqPrice : undefined,
+        pnlPercent,
+      };
+    }).filter((p) => Math.abs(p.positionAmt) > 0);
+
+    let totalFuturesMarginUsd = 0;
+    let totalFuturesUnrealizedPnl = 0;
+    let totalFuturesEquityUsd = 0;
+
+    for (const fa of futuresAssets) {
+      totalFuturesMarginUsd += fa.walletBalance;
+      totalFuturesUnrealizedPnl += fa.unrealizedProfit;
+      totalFuturesEquityUsd += fa.marginBalance;
+    }
+
+    const totalNetWorthUsd = totalSpotUsd + totalFuturesEquityUsd;
+
+    return {
+      success: true,
+      data: {
+        spotBalances,
+        totalSpotUsd,
+        futuresAssets,
+        futuresPositions,
+        totalFuturesMarginUsd,
+        totalFuturesUnrealizedPnl,
+        totalFuturesEquityUsd,
+        totalNetWorthUsd,
+        canTrade: spotRes.canTrade !== undefined ? spotRes.canTrade : (futuresRes.canTrade || false),
+        accountType: spotRes.accountType || (futuresRes.feeTier !== undefined ? 'FUTURES' : 'SPOT'),
+        lastUpdated: Date.now(),
+      },
+    };
+  } catch (err: any) {
+    console.error('Error fetching full Binance wallet:', err);
+    return { success: false, error: err.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลกระเป๋า Binance' };
+  }
+}
+

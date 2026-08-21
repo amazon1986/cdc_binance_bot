@@ -202,3 +202,63 @@ export interface TelegramTestResponse {
   error?: string;
 }
 
+export interface SpotBalanceItem {
+  asset: string;
+  free: number;
+  locked: number;
+  total: number;
+  usdPrice: number;
+  usdValue: number;
+  priceChange24h?: number;
+  percentOfPortfolio?: number;
+}
+
+export interface FuturesPositionItem {
+  symbol: string;
+  initialMargin: number;
+  maintMargin: number;
+  unrealizedProfit: number;
+  positionInitialMargin: number;
+  openOrderInitialMargin: number;
+  leverage: number;
+  isolated: boolean;
+  entryPrice: number;
+  markPrice: number;
+  breakEvenPrice?: number;
+  maxNotional?: number;
+  positionSide: string;
+  positionAmt: number;
+  notional: number;
+  liquidationPrice?: number;
+  pnlPercent?: number;
+}
+
+export interface FuturesAssetItem {
+  asset: string;
+  walletBalance: number;
+  unrealizedProfit: number;
+  marginBalance: number;
+  maintMargin: number;
+  initialMargin: number;
+  positionInitialMargin: number;
+  openOrderInitialMargin: number;
+  crossWalletBalance: number;
+  crossUnPnl: number;
+  availableBalance: number;
+  maxWithdrawAmount: number;
+}
+
+export interface BinanceWalletData {
+  spotBalances: SpotBalanceItem[];
+  totalSpotUsd: number;
+  futuresAssets: FuturesAssetItem[];
+  futuresPositions: FuturesPositionItem[];
+  totalFuturesMarginUsd: number;
+  totalFuturesUnrealizedPnl: number;
+  totalFuturesEquityUsd: number;
+  totalNetWorthUsd: number;
+  canTrade: boolean;
+  accountType?: string;
+  lastUpdated: number;
+}
+

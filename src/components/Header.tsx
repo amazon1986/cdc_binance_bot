@@ -19,8 +19,8 @@ import {
 } from 'lucide-react';
 
 interface HeaderProps {
-  activeTab: 'chart' | 'backtest' | 'scanner' | 'ai' | 'history' | 'stats' | 'coffee';
-  setActiveTab: (tab: 'chart' | 'backtest' | 'scanner' | 'ai' | 'history' | 'stats' | 'coffee') => void;
+  activeTab: 'chart' | 'wallet' | 'backtest' | 'scanner' | 'ai' | 'history' | 'stats' | 'coffee';
+  setActiveTab: (tab: 'chart' | 'wallet' | 'backtest' | 'scanner' | 'ai' | 'history' | 'stats' | 'coffee') => void;
   botConfig: BotConfig;
   paperAccount: PaperAccount;
   onOpenSettings: () => void;
@@ -205,6 +205,7 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Navigation Tabs Bar */}
       <div className="bg-slate-950/80 border-t border-slate-800/80 px-3 sm:px-6 lg:px-8">
         <div className="max-w-7xl mx-auto flex space-x-1 sm:space-x-2 overflow-x-auto py-2 scrollbar-none touch-pan-x overscroll-x-contain">
+          {/* 1. Chart & Bot Control */}
           <button
             onClick={() => setActiveTab('chart')}
             className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-xs font-medium transition whitespace-nowrap ${
@@ -217,6 +218,20 @@ export const Header: React.FC<HeaderProps> = ({
             <span>ชาร์ต & ควบคุมบอท</span>
           </button>
 
+          {/* 2. Wallet (Binance & Paper) */}
+          <button
+            onClick={() => setActiveTab('wallet')}
+            className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-xs font-medium transition whitespace-nowrap ${
+              activeTab === 'wallet'
+                ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-semibold'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+            }`}
+          >
+            <Wallet className="w-4 h-4" />
+            <span>กระเป๋าเหรียญ (Wallet)</span>
+          </button>
+
+          {/* 3. Trade History */}
           <button
             onClick={() => setActiveTab('history')}
             className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-xs font-medium transition whitespace-nowrap ${

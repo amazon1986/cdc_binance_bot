@@ -61,6 +61,7 @@ import { TelegramSettingsModal } from './components/TelegramSettingsModal';
 import { TradeHistoryTable } from './components/TradeHistoryTable';
 import { TradingStats } from './components/TradingStats';
 import { CoffeeDonation } from './components/CoffeeDonation';
+import { BinanceWalletView } from './components/BinanceWalletView';
 
 
 /**
@@ -88,7 +89,7 @@ function calculateOrderSize(config: BotConfig, account: PaperAccount): number {
 }
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'chart' | 'backtest' | 'scanner' | 'ai' | 'history' | 'stats' | 'coffee'>('chart');
+  const [activeTab, setActiveTab] = useState<'chart' | 'wallet' | 'backtest' | 'scanner' | 'ai' | 'history' | 'stats' | 'coffee'>('chart');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isTelegramModalOpen, setIsTelegramModalOpen] = useState(false);
 
@@ -519,6 +520,22 @@ export default function App() {
               }}
             />
           </div>
+        )}
+
+        {activeTab === 'wallet' && (
+          <BinanceWalletView
+            binanceKeys={binanceKeys}
+            paperAccount={paperAccount}
+            botConfig={botConfig}
+            allTickers={allTickers}
+            onOpenSettings={() => setIsSettingsOpen(true)}
+            onSelectSymbol={(selectedSymbol) => {
+              handleSaveBotConfig({ ...botConfig, symbol: selectedSymbol });
+              setActiveTab('chart');
+              showToast(`เลือกเหรียญ ${selectedSymbol} ขึ้นชาร์ตเรียบร้อยแล้ว`, 'info');
+            }}
+            onClosePaperPosition={handleCloseSpecificPosition}
+          />
         )}
 
         {activeTab === 'backtest' && <BacktestingView />}
