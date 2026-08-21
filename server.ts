@@ -286,6 +286,9 @@ async function sendTelegramNotification(
 // Memory cache for signal alerts to avoid spamming the same candle
 const alertedSignals = new Map<string, number>();
 
+// Map to track symbols that got stopped out to protect against whipsaws in the current cycle
+const stoppedOutCycles = new Map<string, { stopTime: number; side: 'LONG' | 'SHORT' }>();
+
 // ==================== SERVER-SIDE 24/7 AUTOMATED CYCLE ====================
 
 // Map to track the last bar time an order was executed per symbol & timeframe
@@ -330,6 +333,13 @@ async function runServerBotCycle() {
         const posLev = pos.leverage || 1;
         const margin = pos.marginUsdt || pos.usdtInvested;
 
+        // Dynamic High/Low Tracking for Trailing Stop Engine
+        if (pos.side === 'LONG') {
+          pos.highestPrice = Math.max(pos.highestPrice || pos.entryPrice, currentPrice);
+        } else {
+          pos.lowestPrice = Math.min(pos.lowestPrice || pos.entryPrice, currentPrice);
+        }
+
         const pnlPercent = pos.side === 'SHORT'
           ? ((pos.entryPrice - currentPrice) / pos.entryPrice) * 100 * posLev
           : ((currentPrice - pos.entryPrice) / pos.entryPrice) * 100 * posLev;
@@ -340,10 +350,33 @@ async function runServerBotCycle() {
           exitReason = '⚡ Auto Liquidation (Margin Call -90%)';
         } else if (config.stopLossPercent > 0 && pnlPercent <= -config.stopLossPercent) {
           exitReason = `Stop Loss (-${config.stopLossPercent}%)`;
-        } else if (config.takeProfitPercent > 0 && pnlPercent >= config.takeProfitPercent) {
+          // Whipsaw Protection: Record stop-out to lock until new cycle
+          stoppedOutCycles.set(barKey, { stopTime: confirmedCandle.time, side: pos.side });
+        } else if (config.useTrailingStop && (config.trailingStopPercent || 0) > 0) {
+          // 🚀 Trailing Stop Engine Trigger
+          const trailPct = config.trailingStopPercent || 7;
+          if (pos.side === 'LONG' && pos.highestPrice && pos.highestPrice > pos.entryPrice) {
+            const trailCutPrice = pos.highestPrice * (1 - trailPct / 100);
+            pos.trailingStopPrice = trailCutPrice;
+            if (currentPrice <= trailCutPrice) {
+              exitReason = `🚀 Trailing Stop Lock Profit (-${trailPct}% จาก High $${pos.highestPrice.toFixed(2)})`;
+            }
+          } else if (pos.side === 'SHORT' && pos.lowestPrice && pos.lowestPrice < pos.entryPrice) {
+            const trailCutPrice = pos.lowestPrice * (1 + trailPct / 100);
+            pos.trailingStopPrice = trailCutPrice;
+            if (currentPrice >= trailCutPrice) {
+              exitReason = `🚀 Trailing Stop Lock Profit (+${trailPct}% จาก Low $${pos.lowestPrice.toFixed(2)})`;
+            }
+          }
+        }
+
+        // Target Take Profit
+        if (!exitReason && config.takeProfitPercent > 0 && pnlPercent >= config.takeProfitPercent) {
           exitReason = `Take Profit (+${config.takeProfitPercent}%)`;
-        } else {
-          // Exit based strictly on CONFIRMED CLOSED BAR zone
+        }
+
+        // CDC Indicator Signal Exit (Confirmed Bar)
+        if (!exitReason) {
           const isExitSignal = pos.side === 'SHORT'
             ? (config.buyOnSignal.includes(confirmedCandle.zone as any) || confirmedCandle.zone === 'BLUE' || confirmedCandle.zone === 'GREEN')
             : (config.sellOnSignal.includes(confirmedCandle.zone as any) || confirmedCandle.zone === 'RED' || confirmedCandle.zone === 'YELLOW');
@@ -417,13 +450,28 @@ ${isWin ? '📈' : '📉'} <b>ผลตอบแทน (PnL):</b> ${isWin ? '+' 
 
       // 🎯 Calculate crossovers on confirmed closed candles only
       const crossInfo = getCrossoverInfo(closedCandles);
-      const isBuySignal = crossInfo.isFreshGoldenCross && (
+
+      // Whipsaw Protection Reset: If an opposite crossover happened, unlock the symbol
+      if (stoppedOutCycles.has(barKey)) {
+        const lockInfo = stoppedOutCycles.get(barKey)!;
+        if (
+          (lockInfo.side === 'LONG' && crossInfo.isFreshDeadCross) ||
+          (lockInfo.side === 'SHORT' && crossInfo.isFreshGoldenCross)
+        ) {
+          stoppedOutCycles.delete(barKey);
+        }
+      }
+
+      // Whipsaw Protection Check: If locked, prevent re-entry in the same cycle
+      const isWhipsawLocked = (config.useWhipsawProtection !== false) && stoppedOutCycles.has(barKey);
+
+      const isBuySignal = !isWhipsawLocked && crossInfo.isFreshGoldenCross && (
         (config.buyOnSignal.includes('BLUE') && confirmedCandle.zone === 'BLUE') ||
         (config.buyOnSignal.includes('GREEN') && confirmedCandle.zone === 'GREEN') ||
         (confirmedCandle.zone === 'BLUE' || confirmedCandle.zone === 'GREEN')
       );
 
-      const isSellSignal = crossInfo.isFreshDeadCross && (
+      const isSellSignal = !isWhipsawLocked && crossInfo.isFreshDeadCross && (
         (config.sellOnSignal.includes('RED') && confirmedCandle.zone === 'RED') ||
         (config.sellOnSignal.includes('YELLOW') && confirmedCandle.zone === 'YELLOW') ||
         (confirmedCandle.zone === 'RED')

@@ -12,7 +12,7 @@ import {
   ResponsiveContainer,
   CartesianGrid,
 } from 'recharts';
-import { Play, TrendingUp, Award, AlertTriangle, ArrowUpRight, ArrowDownRight, RefreshCw, BarChart2 } from 'lucide-react';
+import { Play, TrendingUp, Award, AlertTriangle, ArrowUpRight, ArrowDownRight, RefreshCw, BarChart2, Sparkles, Shield } from 'lucide-react';
 
 export const BacktestingView: React.FC = () => {
   const [symbol, setSymbol] = useState('BTCUSDT');
@@ -21,6 +21,9 @@ export const BacktestingView: React.FC = () => {
   const [initialCapital, setInitialCapital] = useState<number | string>(1000);
   const [stopLossPct, setStopLossPct] = useState<number | string>(5);
   const [takeProfitPct, setTakeProfitPct] = useState<number | string>(20);
+  const [useTrailingStop, setUseTrailingStop] = useState(false);
+  const [trailingStopPct, setTrailingStopPct] = useState<number | string>(7);
+  const [useWhipsawProtection, setUseWhipsawProtection] = useState(true);
   const [directionMode, setDirectionMode] = useState<'LONG_ONLY' | 'SHORT_ONLY' | 'BOTH'>('BOTH');
   const [buyZone, setBuyZone] = useState<'BLUE' | 'GREEN'>('BLUE');
 
@@ -42,6 +45,7 @@ export const BacktestingView: React.FC = () => {
       const numInitialCapital = Number(initialCapital) || 1000;
       const numStopLossPct = Number(stopLossPct) || 0;
       const numTakeProfitPct = Number(takeProfitPct) || 0;
+      const numTrailingPct = Number(trailingStopPct) || 7;
 
       let usdtBalance = numInitialCapital;
       let inPosition = false;
@@ -50,6 +54,9 @@ export const BacktestingView: React.FC = () => {
       let entryTime = 0;
       let positionCoins = 0;
       let entryReason = '';
+      let highestPrice = 0;
+      let lowestPrice = 0;
+      let whipsawLock: 'LONG' | 'SHORT' | null = null;
 
       const trades: BacktestTrade[] = [];
       const equityCurve: { time: number; equity: number; price: number; dateStr: string }[] = [];
@@ -91,6 +98,12 @@ export const BacktestingView: React.FC = () => {
 
         // 1. Check Exit triggers if in position
         if (inPosition) {
+          if (posSide === 'LONG') {
+            highestPrice = Math.max(highestPrice || entryPrice, candle.high || candle.close);
+          } else {
+            lowestPrice = Math.min(lowestPrice || entryPrice, candle.low || candle.close);
+          }
+
           const currentProfitPct =
             posSide === 'LONG'
               ? ((candle.close - entryPrice) / entryPrice) * 100
@@ -103,17 +116,35 @@ export const BacktestingView: React.FC = () => {
           if (numStopLossPct > 0 && currentProfitPct <= -numStopLossPct) {
             shouldExit = true;
             exitReason = `Stop Loss (-${numStopLossPct}%)`;
+            whipsawLock = posSide;
           }
-          // B. Take Profit
-          else if (numTakeProfitPct > 0 && currentProfitPct >= numTakeProfitPct) {
+          // B. Trailing Stop Engine
+          else if (useTrailingStop && numTrailingPct > 0) {
+            if (posSide === 'LONG' && highestPrice > entryPrice) {
+              const trailCut = highestPrice * (1 - numTrailingPct / 100);
+              if (candle.close <= trailCut) {
+                shouldExit = true;
+                exitReason = `Trailing Stop (-${numTrailingPct}% จาก High)`;
+              }
+            } else if (posSide === 'SHORT' && lowestPrice < entryPrice) {
+              const trailCut = lowestPrice * (1 + numTrailingPct / 100);
+              if (candle.close >= trailCut) {
+                shouldExit = true;
+                exitReason = `Trailing Stop (+${numTrailingPct}% จาก Low)`;
+              }
+            }
+          }
+
+          // C. Take Profit
+          if (!shouldExit && numTakeProfitPct > 0 && currentProfitPct >= numTakeProfitPct) {
             shouldExit = true;
             exitReason = `Take Profit (+${numTakeProfitPct}%)`;
           }
-          // C. CDC Signal Exit
-          else if (posSide === 'LONG' && (candle.zone === 'RED' || candle.zone === 'YELLOW')) {
+          // D. CDC Signal Exit
+          else if (!shouldExit && posSide === 'LONG' && (candle.zone === 'RED' || candle.zone === 'YELLOW')) {
             shouldExit = true;
             exitReason = `CDC ${candle.colorNameTh}`;
-          } else if (posSide === 'SHORT' && (candle.zone === 'BLUE' || candle.zone === 'GREEN')) {
+          } else if (!shouldExit && posSide === 'SHORT' && (candle.zone === 'BLUE' || candle.zone === 'GREEN')) {
             shouldExit = true;
             exitReason = `CDC ${candle.colorNameTh}`;
           }
@@ -162,21 +193,37 @@ export const BacktestingView: React.FC = () => {
           const isLongTrigger = buyZone === 'BLUE' ? isFirstBlue : isFirstConfirmedGreen || isFirstBlue;
           const isShortTrigger = candle.zone === 'RED' && (!prevCandle || prevCandle.zone !== 'RED');
 
-          if ((directionMode === 'LONG_ONLY' || directionMode === 'BOTH') && isLongTrigger) {
-            inPosition = true;
-            posSide = 'LONG';
-            entryPrice = candle.close;
-            entryTime = candle.time;
-            positionCoins = usdtBalance / entryPrice;
-            entryReason = `CDC ${candle.colorNameTh}`;
-            usdtBalance = 0;
-          } else if ((directionMode === 'SHORT_ONLY' || directionMode === 'BOTH') && isShortTrigger) {
-            inPosition = true;
-            posSide = 'SHORT';
-            entryPrice = candle.close;
-            entryTime = candle.time;
-            positionCoins = usdtBalance / entryPrice;
-            entryReason = `CDC ${candle.colorNameTh}`;
+          // Reset Whipsaw Lock on opposite crossover
+          if (whipsawLock === 'LONG' && isShortTrigger) {
+            whipsawLock = null;
+          } else if (whipsawLock === 'SHORT' && isLongTrigger) {
+            whipsawLock = null;
+          }
+
+          const isLockedOut = useWhipsawProtection && (
+            (whipsawLock === 'LONG' && isLongTrigger) ||
+            (whipsawLock === 'SHORT' && isShortTrigger)
+          );
+
+          if (!isLockedOut) {
+            if ((directionMode === 'LONG_ONLY' || directionMode === 'BOTH') && isLongTrigger) {
+              inPosition = true;
+              posSide = 'LONG';
+              entryPrice = candle.close;
+              highestPrice = candle.close;
+              entryTime = candle.time;
+              positionCoins = usdtBalance / entryPrice;
+              entryReason = `CDC ${candle.colorNameTh}`;
+              usdtBalance = 0;
+            } else if ((directionMode === 'SHORT_ONLY' || directionMode === 'BOTH') && isShortTrigger) {
+              inPosition = true;
+              posSide = 'SHORT';
+              entryPrice = candle.close;
+              lowestPrice = candle.close;
+              entryTime = candle.time;
+              positionCoins = usdtBalance / entryPrice;
+              entryReason = `CDC ${candle.colorNameTh}`;
+            }
           }
         }
       }
@@ -370,27 +417,88 @@ export const BacktestingView: React.FC = () => {
               <option value="GREEN">โซนเขียว (Green Confirmation คอนเฟิร์ม ⭐)</option>
             </select>
           </div>
+        </div>
 
-          {/* Start Backtest Button */}
-          <div className="flex items-end">
-            <button
-              onClick={runBacktest}
-              disabled={isLoading}
-              className="w-full py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold rounded-xl text-xs shadow-lg transition flex items-center justify-center space-x-2 disabled:opacity-50"
-            >
-              {isLoading ? (
-                <>
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>กำลังคำนวณ...</span>
-                </>
-              ) : (
-                <>
-                  <Play className="w-4 h-4 fill-current" />
-                  <span>เริ่มการทดสอบ Backtest</span>
-                </>
-              )}
-            </button>
+        {/* Trailing Stop & Whipsaw Protection Controls */}
+        <div className="p-3.5 bg-slate-950/80 border border-purple-500/20 rounded-xl space-y-2.5">
+          <div className="flex items-center space-x-1.5 text-purple-400 text-xs font-bold">
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Trailing Stop & Whipsaw Protection Engines (ระบบล็อคกำไร & กันสับขาหลอก)</span>
           </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+            {/* Trailing Stop */}
+            <div className={`p-3 rounded-lg border flex flex-col justify-between space-y-2 ${
+              useTrailingStop ? 'bg-purple-950/20 border-purple-500/40 text-purple-100' : 'bg-slate-900 border-slate-800 text-slate-400'
+            }`}>
+              <label className="flex items-start space-x-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={useTrailingStop}
+                  onChange={(e) => setUseTrailingStop(e.target.checked)}
+                  className="mt-0.5 rounded bg-slate-950 border-slate-700 text-purple-600 focus:ring-0 cursor-pointer"
+                />
+                <div>
+                  <span className="font-bold text-slate-100 block">เปิดใช้ Trailing Stop (ล็อคกำไรสูงสุด)</span>
+                  <p className="text-[11px] text-slate-400">ปิดทำกำไรเมื่อราคาย่อตัวลงมาจากจุดสูงสุด</p>
+                </div>
+              </label>
+
+              <div className="flex items-center space-x-2 pt-1">
+                <span className="text-slate-300 font-mono text-[11px]">Trailing %:</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="50"
+                  step="0.5"
+                  disabled={!useTrailingStop}
+                  value={trailingStopPct}
+                  onChange={(e) => setTrailingStopPct(e.target.value === '' ? '' : Number(e.target.value))}
+                  className="w-16 bg-slate-950 border border-slate-800 rounded-lg px-2 py-0.5 text-purple-300 font-bold font-mono text-center disabled:opacity-50"
+                />
+                <span className="text-slate-400 text-[11px] font-mono">% จากจุดสูงสุด</span>
+              </div>
+            </div>
+
+            {/* Whipsaw Protection */}
+            <div className={`p-3 rounded-lg border flex flex-col justify-between space-y-2 ${
+              useWhipsawProtection ? 'bg-blue-950/20 border-blue-500/40 text-blue-100' : 'bg-slate-900 border-slate-800 text-slate-400'
+            }`}>
+              <label className="flex items-start space-x-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={useWhipsawProtection}
+                  onChange={(e) => setUseWhipsawProtection(e.target.checked)}
+                  className="mt-0.5 rounded bg-slate-950 border-slate-700 text-blue-600 focus:ring-0 cursor-pointer"
+                />
+                <div>
+                  <span className="font-bold text-slate-100 block">เปิดใช้ Stop Loss Lock (Whipsaw Protection)</span>
+                  <p className="text-[11px] text-slate-400">ล็อคเหรียญที่โดน Stop Loss ไม่ให้เข้าซื้อซ้ำในรอบเดิม ป้องกันสับขาหลอก</p>
+                </div>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        {/* Start Backtest Button */}
+        <div>
+          <button
+            onClick={runBacktest}
+            disabled={isLoading}
+            className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold rounded-xl text-xs shadow-lg transition flex items-center justify-center space-x-2 disabled:opacity-50"
+          >
+            {isLoading ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                <span>กำลังคำนวณ Backtest...</span>
+              </>
+            ) : (
+              <>
+                <Play className="w-4 h-4 fill-current" />
+                <span>เริ่มการทดสอบ Backtest</span>
+              </>
+            )}
+          </button>
         </div>
       </div>
 

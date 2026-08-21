@@ -57,6 +57,7 @@ export interface BotConfig {
   takeProfitPercent: number; // 0 = disabled
   useTrailingStop: boolean;
   trailingStopPercent: number;
+  useWhipsawProtection?: boolean;
   buyOnSignal: ('BLUE' | 'GREEN')[];
   sellOnSignal: ('YELLOW' | 'RED')[];
   mode: 'PAPER' | 'BINANCE_LIVE';
@@ -77,6 +78,9 @@ export interface PaperPosition {
   marginUsdt?: number; // Margin reserved
   leverage?: number; // Leverage 1x-10x used
   liquidationPrice?: number; // Estimated liquidation price
+  highestPrice?: number; // Highest price reached since entry (for Trailing Stop)
+  lowestPrice?: number; // Lowest price reached since entry (for Trailing Stop)
+  trailingStopPrice?: number; // Current dynamic Trailing Stop price
   entryTime: number;
   stopLossPrice?: number;
   takeProfitPrice?: number;

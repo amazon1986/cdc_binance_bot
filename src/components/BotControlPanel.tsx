@@ -15,6 +15,7 @@ import {
   Trash2,
   ArrowUpRight,
   ArrowDownRight,
+  Sparkles,
 } from 'lucide-react';
 
 interface BotControlPanelProps {
@@ -667,6 +668,99 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
                     </div>
                   </div>
                 )}
+              </div>
+            </div>
+
+            {/* Trailing Stop & Whipsaw Protection Engines */}
+            <div className="p-4 bg-slate-950/90 border border-purple-500/20 rounded-2xl space-y-3 shadow-lg">
+              <div className="flex items-center space-x-2 text-purple-400">
+                <Sparkles className="w-4 h-4 text-purple-400" />
+                <h4 className="text-xs font-bold text-slate-100 tracking-tight">
+                  Trailing Stop & Whipsaw Protection Engines
+                </h4>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                {/* 1. Trailing Stop Box */}
+                <div
+                  className={`p-3.5 rounded-xl border transition flex flex-col justify-between space-y-2.5 ${
+                    configForm.useTrailingStop
+                      ? 'bg-purple-950/20 border-purple-500/40 text-purple-100'
+                      : 'bg-slate-900/60 border-slate-800/80 text-slate-400'
+                  }`}
+                >
+                  <label className="flex items-start space-x-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      disabled={!isEditing}
+                      checked={configForm.useTrailingStop}
+                      onChange={(e) =>
+                        setConfigForm({ ...configForm, useTrailingStop: e.target.checked })
+                      }
+                      className="mt-0.5 rounded bg-slate-950 border-slate-700 text-purple-600 focus:ring-0 cursor-pointer w-4 h-4"
+                    />
+                    <div className="space-y-1">
+                      <span className="font-bold text-slate-100 block text-xs">
+                        เปิดใช้ Trailing Stop (ล็อคกำไรสูงสุดตามการวิ่งของราคา)
+                      </span>
+                      <p className="text-[11px] text-slate-400 leading-relaxed font-normal">
+                        เลื่อนจุดตัดขาดทุนขึ้นตามราคาสูงสุด และปิดทำกำไรเมื่อราคาย่อตัวลงมาตาม % ที่ตั้งไว้
+                      </p>
+                    </div>
+                  </label>
+
+                  <div className="pt-2 border-t border-slate-800/60 flex items-center space-x-2">
+                    <span className="text-slate-300 font-mono text-[11px]">Trailing %:</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="50"
+                      step="0.5"
+                      disabled={!isEditing || !configForm.useTrailingStop}
+                      value={configForm.trailingStopPercent ?? 7}
+                      onChange={(e) =>
+                        setConfigForm({
+                          ...configForm,
+                          trailingStopPercent: Number(e.target.value) || 7,
+                        })
+                      }
+                      className="w-16 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-purple-300 font-bold font-mono text-center focus:border-purple-500 disabled:opacity-50"
+                    />
+                    <span className="text-slate-400 text-[11px] font-mono">% จากจุดสูงสุด</span>
+                  </div>
+                </div>
+
+                {/* 2. Whipsaw Protection Box */}
+                <div
+                  className={`p-3.5 rounded-xl border transition flex flex-col justify-between space-y-2.5 ${
+                    configForm.useWhipsawProtection !== false
+                      ? 'bg-blue-950/20 border-blue-500/40 text-blue-100'
+                      : 'bg-slate-900/60 border-slate-800/80 text-slate-400'
+                  }`}
+                >
+                  <label className="flex items-start space-x-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      disabled={!isEditing}
+                      checked={configForm.useWhipsawProtection !== false}
+                      onChange={(e) =>
+                        setConfigForm({
+                          ...configForm,
+                          useWhipsawProtection: e.target.checked,
+                        })
+                      }
+                      className="mt-0.5 rounded bg-slate-950 border-slate-700 text-blue-600 focus:ring-0 cursor-pointer w-4 h-4"
+                    />
+                    <div className="space-y-1">
+                      <span className="font-bold text-slate-100 block text-xs">
+                        เปิดใช้ Stop Loss Lock (Whipsaw Protection)
+                      </span>
+                      <p className="text-[11px] text-slate-400 leading-relaxed font-normal">
+                        ล็อคเหรียญที่โดน Stop Loss ไม่ให้เข้าซื้อซ้ำในรอบเดิม ป้องกันการโดนสับขาหลอกซ้ำๆ
+                      </p>
+                    </div>
+                  </label>
+                </div>
               </div>
             </div>
 

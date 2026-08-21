@@ -38,7 +38,8 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
   stopLossPercent: 5,
   takeProfitPercent: 25, // 🎯 Target Take Profit 25%
   useTrailingStop: false,
-  trailingStopPercent: 3,
+  trailingStopPercent: 7, // 🎯 Default 7% Trailing Stop
+  useWhipsawProtection: true, // 🛡️ เปิดใช้ Stop Loss Lock (Whipsaw Protection)
   buyOnSignal: ['BLUE', 'GREEN'], // 🎯 สัญญาณฟ้าแรก หรือ เขียวแรกคอนเฟิร์มตามลุงโฉลก (Safe Confirmed Entry)
   sellOnSignal: ['RED'], // 🎯 ขายออก/Short เฉพาะสัญญาณแดงแรกคอนเฟิร์ม (Bearish Cash Out)
   mode: 'PAPER',
@@ -72,6 +73,9 @@ export function getStoredBotConfig(): BotConfig {
       timeframe: parsed.timeframe || '1d',
       maxOpenPositions: parsed.maxOpenPositions && parsed.maxOpenPositions > 0 ? parsed.maxOpenPositions : 10,
       positionSizingMode: parsed.positionSizingMode || 'EQUAL_WEIGHT',
+      trailingStopPercent: parsed.trailingStopPercent !== undefined ? parsed.trailingStopPercent : 7,
+      useTrailingStop: parsed.useTrailingStop ?? false,
+      useWhipsawProtection: parsed.useWhipsawProtection ?? true,
       scanMode: parsed.scanMode || 'MULTI_SCAN',
       directionMode: parsed.directionMode || 'BOTH',
       buyOnSignal: parsed.buyOnSignal && parsed.buyOnSignal.length > 0 ? parsed.buyOnSignal : ['BLUE', 'GREEN'],
