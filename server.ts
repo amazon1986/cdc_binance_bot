@@ -1644,19 +1644,28 @@ app.post('/api/binance/history', async (req, res) => {
           const isPnl = inc.incomeType === 'REALIZED_PNL';
           const isFunding = inc.incomeType === 'FUNDING_FEE';
           const isCommission = inc.incomeType === 'COMMISSION';
+          const isTransfer = inc.incomeType === 'TRANSFER';
 
           let reason = inc.incomeType;
-          let side: string = incomeVal >= 0 ? 'CLOSE_LONG' : 'CLOSE_SHORT';
+          let side: string = 'INFO';
 
           if (isPnl) {
             reason = incomeVal >= 0 ? 'กำไรปิดสัญญา (Realized PnL)' : 'ขาดทุนปิดสัญญา (Realized Loss)';
             side = incomeVal >= 0 ? 'CLOSE_LONG' : 'CLOSE_SHORT';
           } else if (isFunding) {
-            reason = `ค่าธรรมเนียม Funding Rate (${incomeVal >= 0 ? '+' : ''}${incomeVal.toFixed(4)} ${inc.asset})`;
+            reason = `ค่าธรรมเนียม Funding Rate (${incomeVal >= 0 ? '+' : ''}${incomeVal.toFixed(4)} ${inc.asset || 'USDT'})`;
             side = 'FUNDING';
           } else if (isCommission) {
-            reason = `ค่าธรรมเนียม Commission (${incomeVal.toFixed(4)} ${inc.asset})`;
+            reason = `ค่าธรรมเนียม Commission (${Math.abs(incomeVal).toFixed(4)} ${inc.asset || 'USDT'})`;
             side = 'FEE';
+          } else if (isTransfer) {
+            reason = incomeVal >= 0
+              ? `โอนเงินเข้ากระเป๋า Futures (+${incomeVal.toFixed(2)} ${inc.asset || 'USDT'})`
+              : `โอนเงินออกจากกระเป๋า Futures (${incomeVal.toFixed(2)} ${inc.asset || 'USDT'})`;
+            side = incomeVal >= 0 ? 'TRANSFER_IN' : 'TRANSFER_OUT';
+          } else {
+            reason = `รายการ ${inc.incomeType} (${incomeVal.toFixed(4)} ${inc.asset || 'USDT'})`;
+            side = 'OTHER';
           }
 
           trades.push({

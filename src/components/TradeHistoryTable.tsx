@@ -151,6 +151,39 @@ export const TradeHistoryTable: React.FC<TradeHistoryTableProps> = ({
   // Helper badge renderer
   const renderSideBadge = (side: string, reason = '') => {
     const rLower = (reason || '').toLowerCase();
+    const isTransfer = side === 'TRANSFER' || side === 'TRANSFER_IN' || side === 'TRANSFER_OUT' || rLower.includes('transfer') || rLower.includes('โอน');
+    const isFunding = side === 'FUNDING' || rLower.includes('funding');
+    const isFee = side === 'FEE' || rLower.includes('commission');
+
+    if (isTransfer) {
+      const isOut = side === 'TRANSFER_OUT' || rLower.includes('ออก');
+      return (
+        <span className={`px-2 py-0.5 rounded font-extrabold text-[11px] border whitespace-nowrap ${
+          isOut
+            ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+            : 'bg-blue-500/20 text-blue-400 border-blue-500/30'
+        }`}>
+          {isOut ? 'โอนออก (Transfer Out)' : 'โอนเข้า (Transfer In)'}
+        </span>
+      );
+    }
+
+    if (isFunding) {
+      return (
+        <span className="px-2 py-0.5 rounded font-extrabold text-[11px] bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 whitespace-nowrap">
+          FUNDING
+        </span>
+      );
+    }
+
+    if (isFee) {
+      return (
+        <span className="px-2 py-0.5 rounded font-extrabold text-[11px] bg-slate-700/60 text-slate-300 border border-slate-600 whitespace-nowrap">
+          FEE
+        </span>
+      );
+    }
+
     const isClose =
       side === 'CLOSE_LONG' ||
       side === 'CLOSE_SHORT' ||
@@ -179,22 +212,6 @@ export const TradeHistoryTable: React.FC<TradeHistoryTableProps> = ({
       return (
         <span className="px-2 py-0.5 rounded font-extrabold text-[11px] bg-rose-500/20 text-rose-400 border border-rose-500/30 whitespace-nowrap">
           {side}
-        </span>
-      );
-    }
-
-    if (side === 'FUNDING') {
-      return (
-        <span className="px-2 py-0.5 rounded font-extrabold text-[11px] bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 whitespace-nowrap">
-          FUNDING
-        </span>
-      );
-    }
-
-    if (side === 'FEE') {
-      return (
-        <span className="px-2 py-0.5 rounded font-extrabold text-[11px] bg-slate-700/60 text-slate-300 border border-slate-600 whitespace-nowrap">
-          FEE
         </span>
       );
     }
@@ -232,16 +249,16 @@ export const TradeHistoryTable: React.FC<TradeHistoryTableProps> = ({
     if (filterSide === 'ALL') return true;
 
     const reasonLower = (t.reason || '').toLowerCase();
+    const isTransfer = t.side === 'TRANSFER' || t.side === 'TRANSFER_IN' || t.side === 'TRANSFER_OUT' || reasonLower.includes('transfer');
+    const isFunding = t.side === 'FUNDING' || reasonLower.includes('funding');
+    const isFee = t.side === 'FEE' || reasonLower.includes('commission');
     const isClose =
-      t.side === 'CLOSE_LONG' ||
-      t.side === 'CLOSE_SHORT' ||
-      (t.realizedPnl !== undefined && t.realizedPnl !== 0) ||
-      reasonLower.includes('close') ||
-      reasonLower.includes('exit');
+      (t.side === 'CLOSE_LONG' || t.side === 'CLOSE_SHORT' || t.side === 'CLOSE' || (t.realizedPnl !== undefined && t.realizedPnl !== 0)) &&
+      !isTransfer && !isFunding && !isFee;
 
     if (filterSide === 'CLOSE') return isClose;
-    if (filterSide === 'LONG') return !isClose && (t.side === 'LONG' || t.side === 'BUY');
-    if (filterSide === 'SHORT') return !isClose && (t.side === 'SHORT' || t.side === 'SELL');
+    if (filterSide === 'LONG') return !isClose && !isTransfer && !isFunding && !isFee && (t.side === 'LONG' || t.side === 'BUY');
+    if (filterSide === 'SHORT') return !isClose && !isTransfer && !isFunding && !isFee && (t.side === 'SHORT' || t.side === 'SELL');
     return true;
   });
 
