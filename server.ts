@@ -242,6 +242,112 @@ async function fetchKlinesDirect(symbol: string, interval: string, limit = 300):
   }
 }
 
+// Symbol Filter & Precision Cache for Binance (Futures & Spot)
+interface SymbolFilterInfo {
+  quantityPrecision: number;
+  pricePrecision: number;
+  stepSize: number;
+  minQty: number;
+  minNotional: number;
+}
+
+const futuresSymbolInfoCache = new Map<string, SymbolFilterInfo>();
+const spotSymbolInfoCache = new Map<string, SymbolFilterInfo>();
+
+async function getSymbolFilterInfo(
+  symbol: string,
+  marketType: 'SPOT' | 'FUTURES',
+  isTestnet: boolean
+): Promise<SymbolFilterInfo> {
+  const cache = marketType === 'FUTURES' ? futuresSymbolInfoCache : spotSymbolInfoCache;
+  if (cache.has(symbol)) {
+    return cache.get(symbol)!;
+  }
+
+  try {
+    const url = marketType === 'FUTURES'
+      ? (isTestnet ? 'https://testnet.binancefuture.com/fapi/v1/exchangeInfo' : 'https://fapi.binance.com/fapi/v1/exchangeInfo')
+      : (isTestnet ? 'https://testnet.binance.vision/api/v3/exchangeInfo' : 'https://api.binance.com/api/v3/exchangeInfo');
+
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      const symbols = data.symbols || [];
+      for (const s of symbols) {
+        let stepSize = 0.001;
+        let minQty = 0.001;
+        let minNotional = 5;
+        let quantityPrecision = s.quantityPrecision ?? 3;
+        let pricePrecision = s.pricePrecision ?? 2;
+
+        const lotSizeFilter = (s.filters || []).find((f: any) => f.filterType === 'LOT_SIZE' || f.filterType === 'MARKET_LOT_SIZE');
+        if (lotSizeFilter) {
+          stepSize = parseFloat(lotSizeFilter.stepSize || '0.001');
+          minQty = parseFloat(lotSizeFilter.minQty || '0.001');
+          if (stepSize > 0) {
+            const stepStr = String(lotSizeFilter.stepSize);
+            if (stepStr.includes('.')) {
+              quantityPrecision = stepStr.split('.')[1].replace(/0+$/, '').length;
+            } else {
+              quantityPrecision = 0;
+            }
+          }
+        }
+
+        const notionalFilter = (s.filters || []).find((f: any) => f.filterType === 'MIN_NOTIONAL' || f.filterType === 'NOTIONAL');
+        if (notionalFilter) {
+          minNotional = parseFloat(notionalFilter.notional || notionalFilter.minNotional || '5');
+        }
+
+        cache.set(s.symbol, {
+          quantityPrecision,
+          pricePrecision,
+          stepSize,
+          minQty,
+          minNotional,
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to fetch Binance exchangeInfo:', err);
+  }
+
+  if (cache.has(symbol)) {
+    return cache.get(symbol)!;
+  }
+
+  // Common fallbacks for popular meme / alt coins if exchangeInfo request failed
+  let defaultPrecision = 3;
+  if (['DOGEUSDT', 'XRPUSDT', 'ADAUSDT', 'TRXUSDT', 'MATICUSDT', 'GALAUSDT', 'VETUSDT', 'PEPEUSDT', 'SHIBUSDT', 'BONKUSDT', 'FLOKIUSDT', '1000PEPEUSDT', '1000SHIBUSDT', '1000BONKUSDT', '1000FLOKIUSDT', '1000LUNCUSDT', '1000RATSUSDT', '1000SATSUSDT'].includes(symbol)) {
+    defaultPrecision = 0;
+  } else if (['SOLUSDT', 'BNBUSDT', 'AVAXUSDT', 'LINKUSDT', 'DOTUSDT', 'NEARUSDT', 'APTUSDT', 'SUIUSDT', 'ARBUSDT', 'OPUSDT'].includes(symbol)) {
+    defaultPrecision = 2;
+  }
+
+  return {
+    quantityPrecision: defaultPrecision,
+    pricePrecision: 4,
+    stepSize: defaultPrecision === 0 ? 1 : Math.pow(10, -defaultPrecision),
+    minQty: defaultPrecision === 0 ? 1 : Math.pow(10, -defaultPrecision),
+    minNotional: 5,
+  };
+}
+
+function formatQuantityByStepSize(qty: number, filterInfo: SymbolFilterInfo): number {
+  const { stepSize, quantityPrecision } = filterInfo;
+  if (stepSize > 0) {
+    const precisionMultiplier = Math.pow(10, quantityPrecision);
+    // Floor to nearest stepSize to prevent precision error
+    const stepped = Math.floor(qty / stepSize) * stepSize;
+    if (quantityPrecision === 0) {
+      return Math.floor(stepped);
+    }
+    return parseFloat((Math.round(stepped * precisionMultiplier) / precisionMultiplier).toFixed(quantityPrecision));
+  }
+  if (quantityPrecision === 0) return Math.floor(qty);
+  return parseFloat(qty.toFixed(quantityPrecision));
+}
+
 async function executeLiveServerOrder(params: {
   symbol: string;
   side: 'BUY' | 'SELL';
@@ -258,6 +364,16 @@ async function executeLiveServerOrder(params: {
   const isTestnet = !!keys.isTestnet;
 
   try {
+    const filterInfo = await getSymbolFilterInfo(params.symbol, marketType, isTestnet);
+    const qty = formatQuantityByStepSize(params.quantity, filterInfo);
+
+    if (qty <= 0) {
+      return {
+        success: false,
+        error: `จำนวนเหรียญที่คำนวณได้ (${params.quantity.toFixed(4)}) น้อยกว่าขนาดขั้นต่ำของเหรียญนี้ (${filterInfo.minQty})`,
+      };
+    }
+
     if (marketType === 'FUTURES') {
       const baseUrl = isTestnet
         ? 'https://testnet.binancefuture.com/fapi/v1'
@@ -280,8 +396,7 @@ async function executeLiveServerOrder(params: {
         }
       }
 
-      // 2. Format quantity
-      const qty = parseFloat(params.quantity.toFixed(6));
+      // 2. Format query and send market order
       const { timestamp, recvWindow } = await getBinanceTimestamp(baseUrl);
       let queryParts = [
         `symbol=${params.symbol}`,
@@ -314,7 +429,6 @@ async function executeLiveServerOrder(params: {
         ? 'https://testnet.binance.vision/api/v3'
         : 'https://api.binance.com/api/v3';
 
-      const qty = parseFloat(params.quantity.toFixed(6));
       const { timestamp, recvWindow } = await getBinanceTimestamp(baseUrl);
       const queryParts = [
         `symbol=${params.symbol}`,
