@@ -797,13 +797,12 @@ app.post('/api/bot/toggle', (req, res) => {
 // 4. Manual Order
 app.post('/api/bot/manual-order', async (req, res) => {
   try {
-    const { symbol, side, amountUsdt, currentPrice } = req.body;
-    if (!symbol || !side || !amountUsdt || !currentPrice) {
-      return res.status(400).json({ error: 'Missing parameters' });
-    }
+    const { symbol: rawSymbol, side: rawSide, amountUsdt, currentPrice } = req.body;
+    const symbol = sanitizeSymbol(rawSymbol);
+    const side = String(rawSide).toUpperCase();
 
-    if (serverState.paperAccount.usdtBalance < amountUsdt) {
-      return res.status(400).json({ error: 'ยอดเงินคงเหลือไม่เพียงพอ' });
+    if (!symbol || (side !== 'LONG' && side !== 'SHORT') || !amountUsdt || !currentPrice) {
+      return res.status(400).json({ error: 'Missing parameters or invalid symbol/side' });
     }
 
     const lev = Math.min(Math.max(1, serverState.botConfig.leverage || 1), 10);
@@ -813,23 +812,46 @@ app.post('/api/bot/manual-order', async (req, res) => {
       ? currentPrice * (1 - 0.9 / lev)
       : currentPrice * (1 + 0.9 / lev);
 
-    serverState.paperAccount.usdtBalance -= amountUsdt;
+    let liveOrderId: string | number | undefined;
 
-    const newPos: PaperPosition = {
-      symbol,
-      side,
-      entryPrice: currentPrice,
-      amount: coinAmount,
-      usdtInvested: amountUsdt,
-      marginUsdt: amountUsdt,
-      leverage: lev,
-      liquidationPrice: Number(liqPrice.toFixed(6)),
-      entryTime: Date.now(),
-      currentPnlUsdt: 0,
-      currentPnlPercent: 0,
-    };
+    if (serverState.botConfig.mode === 'BINANCE_LIVE') {
+      if (!serverState.liveApiKeys || !serverState.liveApiKeys.apiKey || !serverState.liveApiKeys.apiSecret) {
+        return res.status(400).json({ error: 'ยังไม่ได้ตั้งค่า Binance API Key กรุณากดปุ่มตั้งค่า (⚙️) เพื่อใส่ API Key ก่อนส่งคำสั่ง' });
+      }
 
-    serverState.paperAccount.activePositions.push(newPos);
+      const liveRes = await executeLiveServerOrder({
+        symbol,
+        side: side === 'LONG' ? 'BUY' : 'SELL',
+        quantity: coinAmount,
+        leverage: lev,
+      });
+
+      if (!liveRes.success) {
+        addServerLog(`❌ [LIVE MANUAL FAILED] ส่งคำสั่งจริง ${side} ${symbol} ล้มเหลว: ${liveRes.error}`);
+        return res.status(400).json({ error: `Binance ปฏิเสธคำสั่ง: ${liveRes.error}` });
+      }
+
+      liveOrderId = liveRes.orderId;
+      addServerLog(`⚡ [LIVE MANUAL SUCCESS] ส่งคำสั่งจริง ${side} ${symbol} สำเร็จ (OrderId: ${liveOrderId})`);
+    } else {
+      if (serverState.paperAccount.usdtBalance < amountUsdt) {
+        return res.status(400).json({ error: 'ยอดเงินคงเหลือในพอร์ตจำลองไม่เพียงพอ' });
+      }
+      serverState.paperAccount.usdtBalance -= amountUsdt;
+      serverState.paperAccount.activePositions.push({
+        symbol,
+        side: side as 'LONG' | 'SHORT',
+        entryPrice: currentPrice,
+        amount: coinAmount,
+        usdtInvested: amountUsdt,
+        marginUsdt: amountUsdt,
+        leverage: lev,
+        liquidationPrice: Number(liqPrice.toFixed(6)),
+        entryTime: Date.now(),
+        currentPnlUsdt: 0,
+        currentPnlPercent: 0,
+      });
+    }
 
     const trade: ExecutedTrade = {
       id: `trade_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -840,48 +862,28 @@ app.post('/api/bot/manual-order', async (req, res) => {
       amount: coinAmount,
       usdtValue: notionalValue,
       leverage: lev,
-      reason: `[Manual Order ${lev}x] เปิด ${side} ด้วยตนเอง`,
+      reason: serverState.botConfig.mode === 'BINANCE_LIVE'
+        ? `[Live Manual ${lev}x] สั่งซื้อกระเป๋าจริง (OrderId: ${liveOrderId})`
+        : `[Manual Order ${lev}x] เปิด ${side} ด้วยตนเอง`,
       timestamp: Date.now(),
       mode: serverState.botConfig.mode,
     };
 
     serverState.tradeHistory.unshift(trade);
-    addServerLog(`✋ [MANUAL ORDER ${lev}x] เปิด ${side} ${symbol} @ $${currentPrice} | ทุน $${amountUsdt} USDT (มูลค่าสัญญา $${notionalValue.toFixed(2)})`);
-
-    // If Live Mode and API keys configured, execute live order on Binance as well
-    if (serverState.botConfig.mode === 'BINANCE_LIVE' && serverState.liveApiKeys) {
-      try {
-        const liveRes = await executeLiveServerOrder({
-          symbol,
-          side: side === 'LONG' ? 'BUY' : 'SELL',
-          quantity: coinAmount,
-          leverage: lev,
-        });
-        if (liveRes.success) {
-          addServerLog(`⚡ [LIVE MANUAL] ส่งคำสั่งจริง ${side} ${symbol} สำเร็จ (OrderId: ${liveRes.orderId})`);
-        } else {
-          addServerLog(`⚠️ [LIVE MANUAL] ส่งคำสั่งจริง ${side} ${symbol} ไม่สำเร็จ: ${liveRes.error}`);
-        }
-      } catch (err: any) {
-        console.error('Live manual order error:', err);
-      }
-    }
-
     saveServerState();
 
     // Telegram Alert for Manual Order
     const timeStr = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
-    const tgManualMsg = `✋ <b>[CDC Bot] เปิดออเดอร์ด้วยตนเอง (Manual Order)</b>
+    const tgManualMsg = `✋ <b>[CDC Bot] เปิดออเดอร์ด้วยตนเอง (${serverState.botConfig.mode === 'BINANCE_LIVE' ? 'พอร์ตจริง Binance 🟢' : 'พอร์ตจำลอง 🗂️'})</b>
 ━━━━━━━━━━━━━━━━━━━━
 🪙 <b>เหรียญ:</b> #${symbol}
 📊 <b>คำสั่ง:</b> ${side} ${lev}x
 💰 <b>ราคา:</b> $${currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 8 })}
 💵 <b>เงินทุน:</b> $${amountUsdt.toFixed(2)} USDT (มูลค่า $${notionalValue.toFixed(2)})
-💼 <b>ยอดพอร์ตคงเหลือ:</b> $${serverState.paperAccount.usdtBalance.toFixed(2)} USDT
-🕒 <b>เวลา:</b> ${timeStr}`;
+${liveOrderId ? `🆔 <b>Order ID:</b> <code>${liveOrderId}</code>\n` : ''}🕒 <b>เวลา:</b> ${timeStr}`;
     sendTelegramNotification(tgManualMsg, 'BUY');
 
-    return res.json({ success: true });
+    return res.json({ success: true, liveOrderId });
   } catch (err: any) {
     return res.status(500).json({ error: sanitizeErrorMessage(err) });
   }
@@ -890,96 +892,104 @@ app.post('/api/bot/manual-order', async (req, res) => {
 // 5. Manual Close Position
 app.post('/api/bot/close-position', async (req, res) => {
   try {
-    let { symbol, currentPrice, reason = 'Manual Close' } = req.body;
-    const idx = serverState.paperAccount.activePositions.findIndex((p) => p.symbol === symbol);
-    if (idx === -1) {
-      return res.status(404).json({ error: 'ไม่พบตำแหน่งที่เปิดอยู่' });
-    }
+    let { symbol: rawSymbol, currentPrice, reason = 'Manual Close' } = req.body;
+    const symbol = sanitizeSymbol(rawSymbol);
+    if (!symbol) return res.status(400).json({ error: 'Invalid symbol format' });
 
-    const pos = serverState.paperAccount.activePositions[idx];
-
-    // Verification: If currentPrice is missing, zero, or has wild ratio error (>50x difference from entryPrice), fetch exact market price for this symbol
-    const priceRatio = (currentPrice && pos.entryPrice) ? (currentPrice / pos.entryPrice) : 0;
-    if (!currentPrice || currentPrice <= 0 || priceRatio > 50 || priceRatio < 0.02) {
-      try {
-        const liveKlines = await fetchKlinesDirect(pos.symbol, '1m', 1);
-        if (liveKlines.length > 0 && liveKlines[0].close > 0) {
-          currentPrice = liveKlines[0].close;
-        }
-      } catch (err) {
-        console.warn(`Failed to verify close price for ${pos.symbol}:`, err);
+    if (serverState.botConfig.mode === 'BINANCE_LIVE') {
+      if (!serverState.liveApiKeys || !serverState.liveApiKeys.apiKey || !serverState.liveApiKeys.apiSecret) {
+        return res.status(400).json({ error: 'ยังไม่ได้ตั้งค่า Binance API Key' });
       }
-    }
 
-    const posLev = pos.leverage || 1;
-    const margin = pos.marginUsdt || pos.usdtInvested;
-    const pnlPercent = pos.side === 'SHORT'
-      ? ((pos.entryPrice - currentPrice) / pos.entryPrice) * 100 * posLev
-      : ((currentPrice - pos.entryPrice) / pos.entryPrice) * 100 * posLev;
-    const pnlUsdt = (margin * pnlPercent) / 100;
-    const returnUsdt = Math.max(0, margin + pnlUsdt);
-
-    serverState.paperAccount.usdtBalance += returnUsdt;
-    serverState.paperAccount.activePositions.splice(idx, 1);
-    serverState.paperAccount.totalTrades += 1;
-    if (pnlUsdt > 0) serverState.paperAccount.winningTrades += 1;
-    else serverState.paperAccount.losingTrades += 1;
-    serverState.paperAccount.totalProfitUsdt += pnlUsdt;
-
-    const trade: ExecutedTrade = {
-      id: `trade_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      symbol: pos.symbol,
-      timeframe: serverState.botConfig.timeframe,
-      side: pos.side === 'LONG' ? 'CLOSE_LONG' : 'CLOSE_SHORT',
-      price: currentPrice,
-      amount: pos.amount,
-      usdtValue: returnUsdt,
-      leverage: posLev,
-      pnlUsdt: Number(pnlUsdt.toFixed(2)),
-      pnlPercent: Number(pnlPercent.toFixed(2)),
-      reason: `[Manual Close] ${reason}`,
-      timestamp: Date.now(),
-      mode: serverState.botConfig.mode,
-    };
-
-    serverState.tradeHistory.unshift(trade);
-    addServerLog(`✋ [MANUAL CLOSE ${posLev}x] ปิดสัญญา ${pos.symbol} @ $${currentPrice} | PnL: ${pnlUsdt >= 0 ? '+' : ''}$${pnlUsdt.toFixed(2)} (${pnlPercent.toFixed(2)}%)`);
-
-    // If Live Mode and API keys configured, execute live close on Binance as well
-    if (serverState.botConfig.mode === 'BINANCE_LIVE' && serverState.liveApiKeys) {
       try {
-        const liveCloseRes = await executeLiveServerOrder({
-          symbol: pos.symbol,
-          side: pos.side === 'LONG' ? 'SELL' : 'BUY',
-          quantity: pos.amount,
-          reduceOnly: true,
+        const baseUrl = serverState.liveApiKeys.isTestnet
+          ? 'https://testnet.binancefuture.com/fapi/v2'
+          : 'https://fapi.binance.com/fapi/v2';
+        const { timestamp, recvWindow } = await getBinanceTimestamp(baseUrl);
+        const signedAccountQuery = buildBinanceSignedQuery(`recvWindow=${recvWindow}&timestamp=${timestamp}`, serverState.liveApiKeys.apiSecret);
+        const accountRes = await fetch(`${baseUrl}/account?${signedAccountQuery}`, {
+          headers: { 'X-MBX-APIKEY': serverState.liveApiKeys.apiKey },
         });
-        if (liveCloseRes.success) {
-          addServerLog(`⚡ [LIVE MANUAL CLOSE] ปิดสัญญาจริง ${pos.symbol} สำเร็จ (OrderId: ${liveCloseRes.orderId})`);
-        } else {
-          addServerLog(`⚠️ [LIVE MANUAL CLOSE] ปิดสัญญาจริง ${pos.symbol} ไม่สำเร็จ: ${liveCloseRes.error}`);
+        const accountData = await accountRes.json();
+        const livePositions = Array.isArray(accountData?.positions) ? accountData.positions : [];
+        const livePos = livePositions.find((p: any) => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
+
+        if (livePos) {
+          const amt = parseFloat(livePos.positionAmt);
+          const isLong = amt > 0;
+          const closeSide = isLong ? 'SELL' : 'BUY';
+          const liveCloseRes = await executeLiveServerOrder({
+            symbol,
+            side: closeSide,
+            quantity: Math.abs(amt),
+            reduceOnly: true,
+          });
+
+          if (!liveCloseRes.success) {
+            addServerLog(`❌ [LIVE MANUAL CLOSE FAILED] ปิดสัญญาจริง ${symbol} ไม่สำเร็จ: ${liveCloseRes.error}`);
+            return res.status(400).json({ error: `Binance ปฏิเสธการปิดสัญญา: ${liveCloseRes.error}` });
+          }
+
+          addServerLog(`⚡ [LIVE MANUAL CLOSE] ปิดสัญญาจริง ${symbol} สำเร็จ (OrderId: ${liveCloseRes.orderId})`);
         }
-      } catch (err: any) {
-        console.error('Live manual close error:', err);
+      } catch (liveCloseErr: any) {
+        console.error('Error closing live position:', liveCloseErr);
       }
     }
 
-    saveServerState();
+    // Also close paper position if present
+    const idx = serverState.paperAccount.activePositions.findIndex((p) => p.symbol === symbol);
+    if (idx !== -1) {
+      const pos = serverState.paperAccount.activePositions[idx];
+      const posLev = pos.leverage || 1;
+      const margin = pos.marginUsdt || pos.usdtInvested;
+      const pnlPercent = pos.side === 'SHORT'
+        ? ((pos.entryPrice - currentPrice) / pos.entryPrice) * 100 * posLev
+        : ((currentPrice - pos.entryPrice) / pos.entryPrice) * 100 * posLev;
+      const pnlUsdt = (margin * pnlPercent) / 100;
+      const returnUsdt = Math.max(0, margin + pnlUsdt);
 
-    // Telegram Alert for Manual Close
-    const isWin = pnlUsdt >= 0;
-    const timeStr = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
-    const tgManualCloseMsg = `${isWin ? '🎉' : '🛑'} <b>[CDC Bot] ปิดสัญญาด้วยตนเอง (Manual Close)</b>
+      serverState.paperAccount.usdtBalance += returnUsdt;
+      serverState.paperAccount.activePositions.splice(idx, 1);
+      serverState.paperAccount.totalTrades += 1;
+      if (pnlUsdt > 0) serverState.paperAccount.winningTrades += 1;
+      else serverState.paperAccount.losingTrades += 1;
+      serverState.paperAccount.totalProfitUsdt += pnlUsdt;
+
+      const trade: ExecutedTrade = {
+        id: `trade_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        symbol: pos.symbol,
+        timeframe: serverState.botConfig.timeframe,
+        side: pos.side === 'LONG' ? 'CLOSE_LONG' : 'CLOSE_SHORT',
+        price: currentPrice,
+        amount: pos.amount,
+        usdtValue: returnUsdt,
+        leverage: posLev,
+        pnlUsdt: Number(pnlUsdt.toFixed(2)),
+        pnlPercent: Number(pnlPercent.toFixed(2)),
+        reason: `[Manual Close] ${reason}`,
+        timestamp: Date.now(),
+        mode: serverState.botConfig.mode,
+      };
+
+      serverState.tradeHistory.unshift(trade);
+      addServerLog(`✋ [MANUAL CLOSE ${posLev}x] ปิดสัญญา ${pos.symbol} @ $${currentPrice} | PnL: ${pnlUsdt >= 0 ? '+' : ''}$${pnlUsdt.toFixed(2)} (${pnlPercent.toFixed(2)}%)`);
+
+      // Telegram Alert for Manual Close
+      const isWin = pnlUsdt >= 0;
+      const timeStr = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
+      const tgManualCloseMsg = `${isWin ? '🎉' : '🛑'} <b>[CDC Bot] ปิดสัญญาด้วยตนเอง (Manual Close)</b>
 ━━━━━━━━━━━━━━━━━━━━
 🪙 <b>เหรียญ:</b> #${pos.symbol}
 📊 <b>สถานะ:</b> ${pos.side} ${posLev}x
 💰 <b>ราคาปิด:</b> $${currentPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 8 })}
 ${isWin ? '📈' : '📉'} <b>PnL:</b> ${isWin ? '+' : ''}$${pnlUsdt.toFixed(2)} USDT (${isWin ? '+' : ''}${pnlPercent.toFixed(2)}%)
 💵 <b>เงินทุนที่ได้รับคืน:</b> $${returnUsdt.toFixed(2)} USDT
-💼 <b>ยอดพอร์ตคงเหลือ:</b> $${serverState.paperAccount.usdtBalance.toFixed(2)} USDT
 🕒 <b>เวลา:</b> ${timeStr}`;
-    sendTelegramNotification(tgManualCloseMsg, 'SELL');
+      sendTelegramNotification(tgManualCloseMsg, 'SELL');
+    }
 
+    saveServerState();
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: sanitizeErrorMessage(err) });

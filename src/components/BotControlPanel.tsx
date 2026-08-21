@@ -46,12 +46,18 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
   const [configForm, setConfigForm] = useState<BotConfig>({ ...botConfig });
   const [isEditing, setIsEditing] = useState(false);
   const [manualPercent, setManualPercent] = useState<number>(botConfig.balancePercent || 25);
+  const [inputMode, setInputMode] = useState<'PERCENT' | 'FIXED'>('PERCENT');
+  const [fixedUsdt, setFixedUsdt] = useState<number>(botConfig.tradeAmountUsdt || 20);
 
   // Active position for current symbol
   const activePos = paperAccount.activePositions.find((p) => p.symbol === botConfig.symbol);
 
-  // Computed Manual Trade USDT amount based on selected percentage of portfolio
-  const computedManualUsdt = (paperAccount.usdtBalance * manualPercent) / 100;
+  // Computed Manual Trade USDT amount based on selected percentage or fixed amount
+  const computedManualUsdt = inputMode === 'FIXED'
+    ? Math.max(5, fixedUsdt)
+    : (botConfig.mode === 'BINANCE_LIVE' && paperAccount.usdtBalance <= 0)
+      ? Math.max(5, fixedUsdt)
+      : Math.max(5, (paperAccount.usdtBalance * manualPercent) / 100);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -310,55 +316,81 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
                 <Zap className="w-4 h-4 text-amber-400" />
                 <span>ส่งคำสั่งซื้อขายเอง (Manual Trade Execution)</span>
               </label>
-              <div className="text-right">
-                <span className="text-[10px] text-slate-400 block">ยอดพอร์ตคงเหลือ:</span>
-                <span className="font-mono text-xs font-bold text-emerald-400">
-                  ${paperAccount.usdtBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT
-                </span>
+              <div className="flex items-center space-x-1 bg-slate-900 p-0.5 rounded-lg border border-slate-800 text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => setInputMode('PERCENT')}
+                  className={`px-2 py-0.5 rounded font-semibold transition ${
+                    inputMode === 'PERCENT' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  % พอร์ต
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setInputMode('FIXED')}
+                  className={`px-2 py-0.5 rounded font-semibold transition ${
+                    inputMode === 'FIXED' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  จำนวน USDT ($)
+                </button>
               </div>
             </div>
 
-            {/* Slider & % Display */}
-            <div className="space-y-2 bg-slate-900/80 p-3 rounded-lg border border-slate-800/60">
-              <div className="flex items-center justify-between text-xs font-mono">
-                <span className="text-slate-400">กำหนดสัดส่วนเงินทุน (% ของพอร์ต):</span>
-                <div className="text-right">
-                  <span className="text-emerald-400 font-extrabold text-sm mr-1">{manualPercent}%</span>
-                  <span className="text-slate-300">
-                    (≈ ${computedManualUsdt.toFixed(2)} USDT)
-                  </span>
+            {/* Slider / Fixed Input */}
+            {inputMode === 'PERCENT' ? (
+              <div className="space-y-2 bg-slate-900/80 p-3 rounded-lg border border-slate-800/60">
+                <div className="flex items-center justify-between text-xs font-mono">
+                  <span className="text-slate-400">สัดส่วนเงินทุน (% ของพอร์ต):</span>
+                  <div className="text-right">
+                    <span className="text-emerald-400 font-extrabold text-sm mr-1">{manualPercent}%</span>
+                    <span className="text-slate-300">(≈ ${computedManualUsdt.toFixed(2)} USDT)</span>
+                  </div>
+                </div>
+
+                <input
+                  type="range"
+                  min="1"
+                  max="100"
+                  step="1"
+                  value={manualPercent}
+                  onChange={(e) => setManualPercent(Number(e.target.value))}
+                  className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                />
+
+                <div className="flex items-center justify-between gap-1.5 pt-1">
+                  {[10, 25, 50, 75, 100].map((pct) => (
+                    <button
+                      key={pct}
+                      type="button"
+                      onClick={() => setManualPercent(pct)}
+                      className={`flex-1 py-1 rounded text-[11px] font-bold font-mono transition border ${
+                        manualPercent === pct
+                          ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50 shadow-sm'
+                          : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white hover:bg-slate-800'
+                      }`}
+                    >
+                      {pct}%
+                    </button>
+                  ))}
                 </div>
               </div>
-
-              {/* Range Slider */}
-              <input
-                type="range"
-                min="1"
-                max="100"
-                step="1"
-                value={manualPercent}
-                onChange={(e) => setManualPercent(Number(e.target.value))}
-                className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
-              />
-
-              {/* Quick Percent Buttons */}
-              <div className="flex items-center justify-between gap-1.5 pt-1">
-                {[10, 25, 50, 75, 100].map((pct) => (
-                  <button
-                    key={pct}
-                    type="button"
-                    onClick={() => setManualPercent(pct)}
-                    className={`flex-1 py-1 rounded text-[11px] font-bold font-mono transition border ${
-                      manualPercent === pct
-                        ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50 shadow-sm'
-                        : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white hover:bg-slate-800'
-                    }`}
-                  >
-                    {pct}%
-                  </button>
-                ))}
+            ) : (
+              <div className="space-y-2 bg-slate-900/80 p-3 rounded-lg border border-slate-800/60">
+                <div className="flex items-center justify-between text-xs font-mono">
+                  <span className="text-slate-400">ระบุจำนวนเงิน (USDT):</span>
+                  <span className="text-emerald-400 font-extrabold text-sm">${computedManualUsdt.toFixed(0)}</span>
+                </div>
+                <input
+                  type="number"
+                  min="5"
+                  value={fixedUsdt}
+                  onChange={(e) => setFixedUsdt(Number(e.target.value))}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-white font-mono text-sm focus:border-emerald-500"
+                />
               </div>
-            </div>
+            )}
 
             {/* CDC Exit Strategy Protection Notice */}
             <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-2.5 flex items-start space-x-2 text-[11px] text-blue-200">
@@ -382,10 +414,10 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
                   type="button"
                   onClick={() => onManualBuy(computedManualUsdt)}
                   className="flex items-center space-x-1 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow transition"
-                  title={`เปิดสัญญา Long ด้วยเงิน $${computedManualUsdt.toFixed(2)} USDT (${manualPercent}%)`}
+                  title={`เปิดสัญญา Long ด้วยเงิน $${computedManualUsdt.toFixed(2)} USDT`}
                 >
                   <ArrowUpRight className="w-4 h-4" />
-                  <span>Manual LONG ({manualPercent}%)</span>
+                  <span>Manual LONG (${computedManualUsdt.toFixed(0)})</span>
                 </button>
 
                 {onManualShort && (

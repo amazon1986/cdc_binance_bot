@@ -316,19 +316,25 @@ export default function App() {
   // Manual Buy Handler (Manual LONG)
   const handleManualBuy = async (customAmountUsdt?: number) => {
     const price = currentPriceInfo.price;
-    if (!price || price === 0) return;
-    const existingPos = paperAccount.activePositions.find((p) => p.symbol === botConfig.symbol);
-    if (existingPos) {
-      showToast(`คุณมีโพซิชัน ${botConfig.symbol} อยู่แล้ว`, 'info');
+    if (!price || price === 0) {
+      showToast('ไม่สามารถดึงราคาปัจจุบันได้ กรุณาลองใหม่อีกครั้ง', 'sell');
       return;
+    }
+
+    if (botConfig.mode === 'PAPER') {
+      const existingPos = paperAccount.activePositions.find((p) => p.symbol === botConfig.symbol);
+      if (existingPos) {
+        showToast(`คุณมีโพซิชันจำลอง ${botConfig.symbol} อยู่แล้ว`, 'info');
+        return;
+      }
     }
 
     const tradeUsdt = customAmountUsdt !== undefined && customAmountUsdt > 0
       ? customAmountUsdt
-      : calculateOrderSize(botConfig, paperAccount);
+      : (botConfig.mode === 'PAPER' ? calculateOrderSize(botConfig, paperAccount) : (botConfig.tradeAmountUsdt || 20));
 
-    if (tradeUsdt < 10) {
-      showToast('ยอดเงินคงเหลือไม่พอสำหรับเปิดสัญญา (ขั้นต่ำ $10)', 'info');
+    if (tradeUsdt < 5) {
+      showToast('ระบุจำนวนเงินขั้นต่ำ $5 USDT', 'info');
       return;
     }
 
@@ -340,7 +346,7 @@ export default function App() {
     });
 
     if (res.success) {
-      showToast(`เปิดสัญญา Long ${botConfig.symbol} สำเร็จ`, 'buy');
+      showToast(`เปิดสัญญา Long ${botConfig.symbol} สำเร็จ (${botConfig.mode === 'BINANCE_LIVE' ? 'พอร์ตจริง Binance 🟢' : 'พอร์ตจำลอง 🗂️'})`, 'buy');
       const data = await fetchBotServerState();
       if (data) {
         setPaperAccount(data.paperAccount);
@@ -355,19 +361,25 @@ export default function App() {
   // Manual Short Handler (Manual SHORT)
   const handleManualShort = async (customAmountUsdt?: number) => {
     const price = currentPriceInfo.price;
-    if (!price || price === 0) return;
-    const existingPos = paperAccount.activePositions.find((p) => p.symbol === botConfig.symbol);
-    if (existingPos) {
-      showToast(`คุณมีโพซิชัน ${botConfig.symbol} อยู่แล้ว`, 'info');
+    if (!price || price === 0) {
+      showToast('ไม่สามารถดึงราคาปัจจุบันได้ กรุณาลองใหม่อีกครั้ง', 'sell');
       return;
+    }
+
+    if (botConfig.mode === 'PAPER') {
+      const existingPos = paperAccount.activePositions.find((p) => p.symbol === botConfig.symbol);
+      if (existingPos) {
+        showToast(`คุณมีโพซิชันจำลอง ${botConfig.symbol} อยู่แล้ว`, 'info');
+        return;
+      }
     }
 
     const tradeUsdt = customAmountUsdt !== undefined && customAmountUsdt > 0
       ? customAmountUsdt
-      : calculateOrderSize(botConfig, paperAccount);
+      : (botConfig.mode === 'PAPER' ? calculateOrderSize(botConfig, paperAccount) : (botConfig.tradeAmountUsdt || 20));
 
-    if (tradeUsdt < 10) {
-      showToast('ยอดเงินคงเหลือไม่พอสำหรับเปิดสัญญา (ขั้นต่ำ $10)', 'info');
+    if (tradeUsdt < 5) {
+      showToast('ระบุจำนวนเงินขั้นต่ำ $5 USDT', 'info');
       return;
     }
 
@@ -379,7 +391,7 @@ export default function App() {
     });
 
     if (res.success) {
-      showToast(`เปิดสัญญา Short ${botConfig.symbol} สำเร็จ`, 'sell');
+      showToast(`เปิดสัญญา Short ${botConfig.symbol} สำเร็จ (${botConfig.mode === 'BINANCE_LIVE' ? 'พอร์ตจริง Binance 🟢' : 'พอร์ตจำลอง 🗂️'})`, 'sell');
       const data = await fetchBotServerState();
       if (data) {
         setPaperAccount(data.paperAccount);
