@@ -295,7 +295,7 @@ async function fetchKlinesDirect(symbol: string, interval: string, limit = 300):
       volume: parseFloat(d[5]),
     }));
 
-    serverKlineCache.set(cacheKey, { data: result, expiry: now + 20000 }); // 20s TTL
+    serverKlineCache.set(cacheKey, { data: result, expiry: now + 30000 }); // 30s TTL
     return result;
   } catch (err) {
     if (cached) return cached.data;
@@ -928,8 +928,8 @@ ${liveOrderId ? `🆔 <b>Order ID:</b> <code>${liveOrderId}</code>\n` : ''}💼 
   }
 }
 
-// Start continuous 24/7 background execution loop every 20 seconds
-setInterval(runServerBotCycle, 20000);
+// Start continuous 24/7 background execution loop every 30 seconds
+setInterval(runServerBotCycle, 30000);
 
 // Self-ping heartbeat every 10 minutes to prevent Render Free Tier from sleeping
 const RENDER_APP_URL = process.env.RENDER_EXTERNAL_URL;
@@ -1374,7 +1374,7 @@ app.get('/api/binance/klines', async (req, res) => {
       return res.status(response.status).json({ error: 'Binance API request failed', details: errText });
     }
     const data = await response.json();
-    serverKlineCache.set(cacheKey, { data, expiry: now + 15000 });
+    serverKlineCache.set(cacheKey, { data, expiry: now + 30000 }); // 30s TTL
     return res.json(data);
   } catch (error: any) {
     return res.status(500).json({ error: sanitizeErrorMessage(error) });
@@ -1409,7 +1409,7 @@ app.get('/api/binance/ticker24h', async (req, res) => {
     }
     const data = await response.json();
     if (!symbol) {
-      serverTickerCache = { data, expiry: now + 15000 }; // 15s TTL
+      serverTickerCache = { data, expiry: now + 30000 }; // 30s TTL
     }
     return res.json(data);
   } catch (error: any) {
@@ -1445,7 +1445,7 @@ app.get('/api/binance/depth', async (req, res) => {
       return res.status(response.status).json({ error: 'Depth request failed' });
     }
     const data = await response.json();
-    serverDepthCache.set(cacheKey, { data, expiry: now + 5000 }); // 5s TTL
+    serverDepthCache.set(cacheKey, { data, expiry: now + 15000 }); // 15s TTL
     return res.json(data);
   } catch (error: any) {
     return res.status(500).json({ error: sanitizeErrorMessage(error) });

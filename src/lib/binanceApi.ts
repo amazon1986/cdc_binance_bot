@@ -72,7 +72,7 @@ export async function fetchBinanceKlines(
       volume: parseFloat(item[5] as string),
     }));
 
-    klineClientCache.set(cacheKey, { data: result, expiry: now + 10000 }); // 10s TTL
+    klineClientCache.set(cacheKey, { data: result, expiry: now + 30000 }); // 30s TTL
     return result;
   } catch (error) {
     console.warn('Direct Binance fetch failed, attempting server proxy...', error);
@@ -80,7 +80,7 @@ export async function fetchBinanceKlines(
       const proxyRes = await fetch(`/api/binance/klines?symbol=${formattedSymbol}&interval=${interval}&limit=${limit}`);
       if (proxyRes.ok) {
         const proxyData = await proxyRes.json();
-        klineClientCache.set(cacheKey, { data: proxyData, expiry: now + 10000 });
+        klineClientCache.set(cacheKey, { data: proxyData, expiry: now + 30000 });
         return proxyData;
       }
     } catch (proxyErr) {
@@ -134,7 +134,7 @@ export async function fetchBinanceTicker24h(symbol?: string): Promise<BinanceTic
     }));
 
     if (!symbol) {
-      tickerClientCache = { data: result, expiry: now + 15000 }; // 15s TTL
+      tickerClientCache = { data: result, expiry: now + 30000 }; // 30s TTL
     }
 
     return result;

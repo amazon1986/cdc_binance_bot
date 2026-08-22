@@ -316,13 +316,13 @@ export default function App() {
     }
   }, [binanceKeys, refreshLiveWallet]);
 
-  // Initial Load & Safe Fallback Intervals (60s instead of 8s/10s to prevent Rate Limits)
+  // Initial Load & Safe Fallback Intervals (30s interval for responsive updates without Rate Limits)
   useEffect(() => {
     loadCandles();
     loadTickers();
 
-    const candleInterval = setInterval(loadCandles, 60000);
-    const tickerInterval = setInterval(loadTickers, 60000);
+    const candleInterval = setInterval(loadCandles, 30000);
+    const tickerInterval = setInterval(loadTickers, 30000);
 
     return () => {
       clearInterval(candleInterval);
