@@ -34,6 +34,9 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
   balancePercent: 33, // 🎯 ไม้ละ ~33% สำหรับพอร์ต $50 (3 ไม้)
   positionSizingMode: 'EQUAL_WEIGHT', // 🎯 ถัวเฉลี่ยเท่ากันทุกเหรียญ (Equal Weight Sizing)
   leverage: 3, // ⚡ Default 3x (ปลอดภัยและผ่านเกณฑ์ขั้นต่ำ $5 ของ Binance เสมอ)
+  longLeverage: 2, // 🟢 Default 2x สำหรับ Long
+  shortLeverage: 3, // 🔴 Default 3x สำหรับ Short
+  isSeparateLeverage: false, // ⚡ โหมดแยก Leverage ตามฝั่ง
   maxOpenPositions: 3, // 🎯 ถือครองสูงสุด 3 ไม้ (แบ่งไม้ละ ~$16 บนทุน $50)
   stopLossPercent: 5,
   takeProfitPercent: 25, // 🎯 Target Take Profit 25%
@@ -66,10 +69,15 @@ export function getStoredBotConfig(): BotConfig {
     if (!raw) return DEFAULT_BOT_CONFIG;
     const parsed = JSON.parse(raw);
     const lev = Math.min(Math.max(1, parseInt(parsed.leverage || 2, 10)), 10);
+    const longLev = Math.min(Math.max(1, parseInt(parsed.longLeverage || 2, 10)), 10);
+    const shortLev = Math.min(Math.max(1, parseInt(parsed.shortLeverage || 3, 10)), 10);
     return {
       ...DEFAULT_BOT_CONFIG,
       ...parsed,
       leverage: isNaN(lev) ? 2 : lev,
+      longLeverage: isNaN(longLev) ? 2 : longLev,
+      shortLeverage: isNaN(shortLev) ? 3 : shortLev,
+      isSeparateLeverage: parsed.isSeparateLeverage ?? false,
       timeframe: parsed.timeframe || '1d',
       maxOpenPositions: parsed.maxOpenPositions && parsed.maxOpenPositions > 0 ? parsed.maxOpenPositions : 10,
       positionSizingMode: parsed.positionSizingMode || 'EQUAL_WEIGHT',

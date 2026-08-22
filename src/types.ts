@@ -51,7 +51,10 @@ export interface BotConfig {
   usePercentBalance: boolean;
   balancePercent: number;
   positionSizingMode?: 'EQUAL_WEIGHT' | 'PERCENT_EQUITY' | 'FIXED_USDT';
-  leverage?: number; // Leverage 1x to 10x
+  leverage?: number; // Unified Leverage 1x to 10x
+  longLeverage?: number; // Separate Long Leverage 1x to 10x
+  shortLeverage?: number; // Separate Short Leverage 1x to 10x
+  isSeparateLeverage?: boolean; // Enable separate Long / Short leverage mode
   maxOpenPositions?: number;
   stopLossPercent: number; // 0 = disabled
   takeProfitPercent: number; // 0 = disabled

@@ -62,6 +62,12 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
   const [inputMode, setInputMode] = useState<'PERCENT' | 'FIXED'>('PERCENT');
   const [fixedUsdt, setFixedUsdt] = useState<number>(botConfig.tradeAmountUsdt || 20);
 
+  React.useEffect(() => {
+    if (!isEditing) {
+      setConfigForm({ ...botConfig });
+    }
+  }, [botConfig, isEditing]);
+
   const isLiveMode = botConfig.mode === 'BINANCE_LIVE';
 
   // Live Position from Binance if in LIVE mode, else Paper Position
@@ -114,6 +120,9 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
       stopLossPercent: Number(configForm.stopLossPercent) || 0,
       takeProfitPercent: Number(configForm.takeProfitPercent) || 0,
       leverage: Math.min(Math.max(1, Number(configForm.leverage) || 1), 10),
+      longLeverage: Math.min(Math.max(1, Number(configForm.longLeverage) || 2), 10),
+      shortLeverage: Math.min(Math.max(1, Number(configForm.shortLeverage) || 3), 10),
+      isSeparateLeverage: configForm.isSeparateLeverage ?? false,
     };
     onSaveConfig(sanitizedConfig);
     setConfigForm(sanitizedConfig);
@@ -634,60 +643,186 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
               </div>
             </div>
 
-            {/* Leverage Control (1x - 10x) */}
+            {/* Leverage Control (1x - 10x) with Separate Long/Short option */}
             <div className="p-3.5 bg-slate-950/80 border border-slate-800/80 rounded-xl space-y-3">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <span className="text-xs font-bold text-amber-400 flex items-center space-x-1.5">
                   <Zap className="w-3.5 h-3.5 text-amber-400" />
                   <span>อัตราคูณ เลเวอเรจ (Leverage Multiplier: 1x - 10x)</span>
                 </span>
-                <span className="text-[11px] font-mono text-amber-300 font-semibold">
-                  ทุน $100 ➔ เปิดสัญญาได้ ${(100 * (configForm.leverage || 1)).toLocaleString()} USDT ({configForm.leverage || 1}x)
-                </span>
+
+                {/* Mode Toggle: Unified vs Separate Long/Short */}
+                <div className="flex items-center space-x-1 bg-slate-900 p-1 rounded-lg border border-slate-800 self-start sm:self-auto">
+                  <button
+                    type="button"
+                    disabled={!isEditing}
+                    onClick={() => setConfigForm({ ...configForm, isSeparateLeverage: false })}
+                    className={`px-2.5 py-1 rounded text-[10px] font-bold transition ${
+                      !configForm.isSeparateLeverage
+                        ? 'bg-amber-500 text-slate-950 shadow-sm'
+                        : 'text-slate-400 hover:text-white disabled:opacity-50'
+                    }`}
+                  >
+                    เท่ากันทุกฝั่ง
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!isEditing}
+                    onClick={() => setConfigForm({ ...configForm, isSeparateLeverage: true })}
+                    className={`px-2.5 py-1 rounded text-[10px] font-bold transition flex items-center space-x-1 ${
+                      configForm.isSeparateLeverage
+                        ? 'bg-gradient-to-r from-emerald-500 to-rose-500 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-white disabled:opacity-50'
+                    }`}
+                  >
+                    <span>⚡ แยก Long / Short</span>
+                  </button>
+                </div>
               </div>
 
-              <div className="space-y-2 bg-slate-900/80 p-3 rounded-lg border border-slate-800/60">
-                <div className="flex items-center justify-between text-xs font-mono">
-                  <span className="text-slate-400">เลือก Leverage:</span>
-                  <span className="text-amber-400 font-extrabold text-sm">{configForm.leverage || 1}x</span>
+              {!configForm.isSeparateLeverage ? (
+                /* Unified Leverage Control */
+                <div className="space-y-2 bg-slate-900/80 p-3 rounded-lg border border-slate-800/60">
+                  <div className="flex items-center justify-between text-xs font-mono">
+                    <span className="text-slate-400">Leverage ทั้งสองฝั่ง:</span>
+                    <span className="text-amber-400 font-extrabold text-sm">{configForm.leverage || 1}x</span>
+                  </div>
+
+                  <input
+                    type="range"
+                    min="1"
+                    max="10"
+                    step="1"
+                    disabled={!isEditing}
+                    value={configForm.leverage || 1}
+                    onChange={(e) => setConfigForm({ ...configForm, leverage: Number(e.target.value) })}
+                    className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500 disabled:opacity-50"
+                  />
+
+                  <div className="flex items-center justify-between gap-1.5 pt-1">
+                    {[1, 2, 3, 5, 10].map((lev) => (
+                      <button
+                        key={lev}
+                        type="button"
+                        disabled={!isEditing}
+                        onClick={() => setConfigForm({ ...configForm, leverage: lev })}
+                        className={`flex-1 py-1 rounded text-[11px] font-bold font-mono transition border ${
+                          (configForm.leverage || 1) === lev
+                            ? 'bg-amber-500/20 text-amber-400 border-amber-500/50 shadow-sm'
+                            : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white hover:bg-slate-800 disabled:opacity-50'
+                        }`}
+                      >
+                        {lev}x
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="text-[11px] font-mono text-slate-400 pt-1 flex items-center justify-between">
+                    <span>พลังซื้อสัญญา:</span>
+                    <span className="text-amber-300 font-semibold">ทุน $100 ➔ ${(100 * (configForm.leverage || 1)).toLocaleString()} USDT ({configForm.leverage || 1}x)</span>
+                  </div>
                 </div>
+              ) : (
+                /* Separate Long and Short Leverage Controls */
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {/* Long Leverage (Buy) */}
+                  <div className="space-y-2 bg-emerald-950/20 p-3 rounded-lg border border-emerald-500/30">
+                    <div className="flex items-center justify-between text-xs font-mono">
+                      <span className="text-emerald-400 font-bold flex items-center space-x-1">
+                        <ArrowUpRight className="w-3.5 h-3.5" />
+                        <span>🟢 ขาซื้อ (Long / Buy):</span>
+                      </span>
+                      <span className="text-emerald-400 font-extrabold text-sm">{configForm.longLeverage || 2}x</span>
+                    </div>
 
-                <input
-                  type="range"
-                  min="1"
-                  max="10"
-                  step="1"
-                  disabled={!isEditing}
-                  value={configForm.leverage || 1}
-                  onChange={(e) => setConfigForm({ ...configForm, leverage: Number(e.target.value) })}
-                  className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500 disabled:opacity-50"
-                />
-
-                <div className="flex items-center justify-between gap-1.5 pt-1">
-                  {[1, 2, 3, 5, 10].map((lev) => (
-                    <button
-                      key={lev}
-                      type="button"
+                    <input
+                      type="range"
+                      min="1"
+                      max="10"
+                      step="1"
                       disabled={!isEditing}
-                      onClick={() => setConfigForm({ ...configForm, leverage: lev })}
-                      className={`flex-1 py-1 rounded text-[11px] font-bold font-mono transition border ${
-                        (configForm.leverage || 1) === lev
-                          ? 'bg-amber-500/20 text-amber-400 border-amber-500/50 shadow-sm'
-                          : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white hover:bg-slate-800 disabled:opacity-50'
-                      }`}
-                    >
-                      {lev}x
-                    </button>
-                  ))}
-                </div>
-              </div>
+                      value={configForm.longLeverage || 2}
+                      onChange={(e) => setConfigForm({ ...configForm, longLeverage: Number(e.target.value) })}
+                      className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500 disabled:opacity-50"
+                    />
 
-              {(configForm.leverage || 1) > 5 && (
+                    <div className="flex items-center justify-between gap-1 pt-1">
+                      {[1, 2, 3, 5, 10].map((lev) => (
+                        <button
+                          key={lev}
+                          type="button"
+                          disabled={!isEditing}
+                          onClick={() => setConfigForm({ ...configForm, longLeverage: lev })}
+                          className={`flex-1 py-1 rounded text-[11px] font-bold font-mono transition border ${
+                            (configForm.longLeverage || 2) === lev
+                              ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50 shadow-sm'
+                              : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white hover:bg-slate-800 disabled:opacity-50'
+                          }`}
+                        >
+                          {lev}x
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="text-[10px] font-mono text-emerald-300/80 pt-0.5">
+                      ทุน $100 ➔ ซื้อได้ ${(100 * (configForm.longLeverage || 2)).toLocaleString()} USDT
+                    </div>
+                  </div>
+
+                  {/* Short Leverage (Sell) */}
+                  <div className="space-y-2 bg-rose-950/20 p-3 rounded-lg border border-rose-500/30">
+                    <div className="flex items-center justify-between text-xs font-mono">
+                      <span className="text-rose-400 font-bold flex items-center space-x-1">
+                        <ArrowDownRight className="w-3.5 h-3.5" />
+                        <span>🔴 ขาชอร์ต (Short / Sell):</span>
+                      </span>
+                      <span className="text-rose-400 font-extrabold text-sm">{configForm.shortLeverage || 3}x</span>
+                    </div>
+
+                    <input
+                      type="range"
+                      min="1"
+                      max="10"
+                      step="1"
+                      disabled={!isEditing}
+                      value={configForm.shortLeverage || 3}
+                      onChange={(e) => setConfigForm({ ...configForm, shortLeverage: Number(e.target.value) })}
+                      className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-rose-500 disabled:opacity-50"
+                    />
+
+                    <div className="flex items-center justify-between gap-1 pt-1">
+                      {[1, 2, 3, 4, 5, 10].map((lev) => (
+                        <button
+                          key={lev}
+                          type="button"
+                          disabled={!isEditing}
+                          onClick={() => setConfigForm({ ...configForm, shortLeverage: lev })}
+                          className={`flex-1 py-1 rounded text-[11px] font-bold font-mono transition border ${
+                            (configForm.shortLeverage || 3) === lev
+                              ? 'bg-rose-500/20 text-rose-400 border-rose-500/50 shadow-sm'
+                              : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-white hover:bg-slate-800 disabled:opacity-50'
+                          }`}
+                        >
+                          {lev}x
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="text-[10px] font-mono text-rose-300/80 pt-0.5">
+                      ทุน $100 ➔ ชอร์ตได้ ${(100 * (configForm.shortLeverage || 3)).toLocaleString()} USDT
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* High Leverage Alert */}
+              {((!configForm.isSeparateLeverage && (configForm.leverage || 1) > 5) ||
+                (configForm.isSeparateLeverage && ((configForm.longLeverage || 2) > 5 || (configForm.shortLeverage || 3) > 5))) && (
                 <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5 flex items-start space-x-2 text-[11px] text-amber-200">
                   <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                   <div className="leading-normal">
-                    <span className="font-bold text-amber-300 block">⚡ แจ้งเตือนความเสี่ยง Leverage สูง ({configForm.leverage}x):</span>
-                    เลเวอเรจ {configForm.leverage}x จะขยายทั้งกำไรและขาดทุน {configForm.leverage} เท่า หากราคาขยับผิดทางเพียง -{(100 / (configForm.leverage || 1)).toFixed(1)}% พอร์ตจะถูก Auto-Liquidate (ขาดทุน 100% ของ Margin)
+                    <span className="font-bold text-amber-300 block">⚡ แจ้งเตือนความเสี่ยง Leverage สูง:</span>
+                    การตั้งค่า Leverage มากกว่า 5x จะเพิ่มอัตราเร่งของผลตอบแทนและขาดทุนอย่างรวดเร็ว โปรดควบคุมความเสี่ยงและกำหนด Stop Loss ให้เหมาะสม
                   </div>
                 </div>
               )}

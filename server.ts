@@ -79,6 +79,9 @@ const DEFAULT_SERVER_STATE: ServerState = {
     balancePercent: 33,
     positionSizingMode: 'EQUAL_WEIGHT',
     leverage: 3,
+    longLeverage: 2,
+    shortLeverage: 3,
+    isSeparateLeverage: false,
     maxOpenPositions: 3,
     stopLossPercent: 5,
     takeProfitPercent: 25,
@@ -819,7 +822,9 @@ ${isWin ? '📈' : '📉'} <b>ผลตอบแทน (PnL):</b> ${isWin ? '+' 
           ? (config.tradeAmountUsdt && config.tradeAmountUsdt >= 5 ? config.tradeAmountUsdt : 20)
           : calculateOrderSize(config, serverState.paperAccount);
 
-        const lev = Math.min(Math.max(1, config.leverage || 1), 10);
+        const lev = targetSide === 'LONG'
+          ? Math.min(Math.max(1, (config.isSeparateLeverage ? config.longLeverage : null) || config.leverage || 1), 10)
+          : Math.min(Math.max(1, (config.isSeparateLeverage ? config.shortLeverage : null) || config.leverage || 1), 10);
         const canExecute = config.mode === 'PAPER'
           ? (tradeUsdt >= 5 && serverState.paperAccount.usdtBalance >= tradeUsdt)
           : (tradeUsdt >= 5);
@@ -967,12 +972,21 @@ app.post('/api/bot/config', (req, res) => {
     if (updated.leverage !== undefined) {
       updated.leverage = Math.min(Math.max(1, parseInt(String(updated.leverage), 10) || 1), 10);
     }
+    if (updated.longLeverage !== undefined) {
+      updated.longLeverage = Math.min(Math.max(1, parseInt(String(updated.longLeverage), 10) || 1), 10);
+    }
+    if (updated.shortLeverage !== undefined) {
+      updated.shortLeverage = Math.min(Math.max(1, parseInt(String(updated.shortLeverage), 10) || 1), 10);
+    }
     serverState.botConfig = {
       ...serverState.botConfig,
       ...updated,
     };
     saveServerState();
-    addServerLog(`⚙️ อัปเดตการตั้งค่าบอท: ${serverState.botConfig.symbol} | Leverage: ${serverState.botConfig.leverage || 1}x | TF: ${serverState.botConfig.timeframe} | สถานะ: ${serverState.botConfig.isActive ? 'เปิดทำงาน 🟢' : 'หยุด 🔴'}`);
+    const levDesc = serverState.botConfig.isSeparateLeverage
+      ? `Long: ${serverState.botConfig.longLeverage || 2}x / Short: ${serverState.botConfig.shortLeverage || 3}x`
+      : `${serverState.botConfig.leverage || 1}x`;
+    addServerLog(`⚙️ อัปเดตการตั้งค่าบอท: ${serverState.botConfig.symbol} | Leverage: ${levDesc} | TF: ${serverState.botConfig.timeframe} | สถานะ: ${serverState.botConfig.isActive ? 'เปิดทำงาน 🟢' : 'หยุด 🔴'}`);
     return res.json({ success: true, botConfig: serverState.botConfig });
   } catch (err: any) {
     return res.status(500).json({ error: sanitizeErrorMessage(err) });
@@ -989,12 +1003,15 @@ app.post('/api/bot/toggle', (req, res) => {
 
   // Telegram Alert for Bot Toggle
   const timeStr = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
+  const levStatusStr = serverState.botConfig.isSeparateLeverage
+    ? `Long ${serverState.botConfig.longLeverage || 2}x / Short ${serverState.botConfig.shortLeverage || 3}x`
+    : `${serverState.botConfig.leverage || 1}x`;
   const statusMsg = `${next ? '🚀' : '⏸'} <b>[CDC Bot] ${next ? 'เปิดใช้งานระบบเทรดอัตโนมัติ 24/7' : 'หยุดการทำงานของบอทชั่วคราว'}</b>
 ━━━━━━━━━━━━━━━━━━━━
 📊 <b>สถานะ:</b> ${next ? 'กำลังทำงาน 🟢 (ACTIVE)' : 'หยุดทำงาน 🔴 (PAUSED)'}
 🪙 <b>เหรียญหลัก:</b> #${serverState.botConfig.symbol}
 ⏱ <b>ไทม์เฟรม:</b> ${serverState.botConfig.timeframe}
-⚡ <b>Leverage:</b> ${serverState.botConfig.leverage || 1}x (${serverState.botConfig.marketType || 'SPOT'})
+⚡ <b>Leverage:</b> ${levStatusStr} (${serverState.botConfig.marketType || 'SPOT'})
 💼 <b>โหมด:</b> ${serverState.botConfig.mode === 'PAPER' ? 'พอร์ตจำลอง (Paper Trading)' : 'พอร์ตจริง (Binance Live)'}
 🕒 <b>เวลา:</b> ${timeStr}`;
   sendTelegramNotification(statusMsg, 'STATUS');
@@ -1013,7 +1030,10 @@ app.post('/api/bot/manual-order', async (req, res) => {
       return res.status(400).json({ error: 'Missing parameters or invalid symbol/side' });
     }
 
-    const lev = Math.min(Math.max(1, serverState.botConfig.leverage || 1), 10);
+    const config = serverState.botConfig;
+    const lev = side === 'LONG'
+      ? Math.min(Math.max(1, (config.isSeparateLeverage ? config.longLeverage : null) || config.leverage || 1), 10)
+      : Math.min(Math.max(1, (config.isSeparateLeverage ? config.shortLeverage : null) || config.leverage || 1), 10);
     const notionalValue = amountUsdt * lev;
     const coinAmount = notionalValue / currentPrice;
     const liqPrice = side === 'LONG'
