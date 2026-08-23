@@ -244,21 +244,6 @@ export const BinanceWalletView: React.FC<BinanceWalletViewProps> = ({
             </div>
           ) : (
             <>
-              {/* Cached Data Notification Banner */}
-              {walletData?.isCached && (
-                <div className="bg-amber-500/10 border border-amber-500/30 text-amber-300 px-4 py-2.5 rounded-xl text-xs flex items-center justify-between gap-2 shadow-sm">
-                  <div className="flex items-center space-x-2">
-                    <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0" />
-                    <span>
-                      <strong>ระบบคงยอดเงินล่าสุดไว้ (Persistent Cache):</strong> กำลังแสดงข้อมูลที่บันทึกไว้เพื่อป้องกันการดีดเป็น 0 และลดคำขอช่วง Rate Limit Cooldown
-                    </span>
-                  </div>
-                  <span className="text-[11px] text-amber-400/80 font-mono shrink-0">
-                    {new Date(walletData.lastUpdated).toLocaleTimeString('th-TH')}
-                  </span>
-                </div>
-              )}
-
               {/* Top Overview Metric Cards (Spot + Futures Combined) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 {/* 1. Total Net Worth & Combined Available USDT */}

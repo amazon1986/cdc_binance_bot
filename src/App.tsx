@@ -606,29 +606,6 @@ export default function App() {
 
       {/* Main Content Body */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 space-y-6">
-        {/* Rate Limit / IP Ban Safety Banner */}
-        {bannedUntil > Date.now() && (
-          <div className="bg-amber-950/40 border border-amber-500/50 text-amber-200 px-5 py-3.5 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg shadow-amber-950/20">
-            <div className="flex items-center space-x-3">
-              <span className="text-2xl">🛡️</span>
-              <div>
-                <div className="font-bold text-amber-100 flex items-center gap-2">
-                  <span>Binance Rate Limit Cooldown Active</span>
-                  <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                    Auto-Protection
-                  </span>
-                </div>
-                <div className="text-xs text-amber-300/80 mt-0.5">
-                  ระบบหยุดส่งคำขอ REST ไปยัง Binance ชั่วคราวเพื่อป้องกันการถูกขยายเวลาแบน (จะปลดอัตโนมัติใน {Math.max(0, Math.ceil((bannedUntil - Date.now()) / 1000))} วินาที) โดยราคายังอัปเดต Real-time ผ่าน WebSocket 🟢
-                </div>
-              </div>
-            </div>
-            <div className="text-xs font-mono bg-emerald-500/20 text-emerald-300 px-3 py-1.5 rounded-xl border border-emerald-500/30 shrink-0">
-              WebSocket Live 🟢
-            </div>
-          </div>
-        )}
-
         {activeTab === 'chart' && (
           <div className="space-y-6">
             <CDCChart
