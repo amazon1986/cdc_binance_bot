@@ -1,5 +1,5 @@
 import React from 'react';
-import { BotConfig, PaperAccount, BinanceTicker24h } from '../types';
+import { BotConfig, PaperAccount, BinanceTicker24h, BinanceWalletData } from '../types';
 import { formatCryptoPrice } from '../lib/binanceApi';
 import {
   TrendingUp,
@@ -16,6 +16,7 @@ import {
   PieChart,
   Coffee,
   Send,
+  Zap,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -23,6 +24,9 @@ interface HeaderProps {
   setActiveTab: (tab: 'chart' | 'wallet' | 'backtest' | 'scanner' | 'ai' | 'history' | 'stats' | 'coffee') => void;
   botConfig: BotConfig;
   paperAccount: PaperAccount;
+  liveWallet?: BinanceWalletData | null;
+  onRefreshLiveWallet?: () => void;
+  isLoadingLiveWallet?: boolean;
   onOpenSettings: () => void;
   onOpenTelegramSettings?: () => void;
   isTelegramEnabled?: boolean;
@@ -39,6 +43,9 @@ export const Header: React.FC<HeaderProps> = ({
   setActiveTab,
   botConfig,
   paperAccount,
+  liveWallet,
+  onRefreshLiveWallet,
+  isLoadingLiveWallet,
   onOpenSettings,
   onOpenTelegramSettings,
   isTelegramEnabled,
@@ -125,7 +132,7 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Right Action Controls: Mode, Balance, Bot Switch, Settings */}
         <div className="flex items-center space-x-3">
-          {/* Paper Balance Badge */}
+          {/* Balance Badge (Paper vs Live Spot+Futures) */}
           {botConfig.mode === 'PAPER' ? (
             <div className="flex items-center space-x-2 bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-lg text-xs">
               <Wallet className="w-4 h-4 text-emerald-400" />
@@ -137,17 +144,54 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
               <button
                 onClick={onResetPaperAccount}
-                title="Reset Paper Account Balance ($1,000)"
+                title="Reset Paper Account Balance ($10,000)"
                 className="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-700 transition"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
               </button>
             </div>
           ) : (
-            <div className="flex items-center space-x-2 bg-amber-500/10 border border-amber-500/30 px-3 py-1.5 rounded-lg text-xs text-amber-400">
-              <ShieldAlert className="w-4 h-4 text-amber-400" />
-              <span className="font-semibold">Binance Live API</span>
-            </div>
+            (() => {
+              const spotUsdt = liveWallet?.spotUsdtFree ?? (liveWallet?.spotBalances?.find((b) => b.asset === 'USDT')?.free ?? 0);
+              const futUsdt = liveWallet?.futuresUsdtAvailable ?? (liveWallet?.futuresAssets?.find((a) => a.asset === 'USDT')?.availableBalance ?? 0);
+              const combinedUsdt = liveWallet?.combinedAvailableUsdt ?? (spotUsdt + futUsdt);
+              const netWorth = liveWallet?.totalNetWorthUsd ?? ((liveWallet?.totalSpotUsd || 0) + (liveWallet?.totalFuturesEquityUsd || 0));
+              const displayLiveUsdt = combinedUsdt > 0 ? combinedUsdt : netWorth;
+
+              return (
+                <div
+                  className="flex items-center space-x-2 bg-amber-500/10 border border-amber-500/30 px-3 py-1.5 rounded-lg text-xs text-amber-400"
+                  title={`Spot: $${spotUsdt.toFixed(2)} USDT | Futures: $${futUsdt.toFixed(2)} USDT | มูลค่ารวมสุทธิ: $${netWorth.toFixed(2)} USD`}
+                >
+                  <Wallet className="w-4 h-4 text-amber-400" />
+                  <div>
+                    <div className="flex items-center space-x-1">
+                      <span className="text-amber-300/80 text-[10px] leading-tight">
+                        Live (Spot + Fut)
+                      </span>
+                      {liveWallet?.isCached && (
+                        <span className="text-[9px] bg-amber-500/20 text-amber-300 px-1 rounded font-mono">
+                          Cached
+                        </span>
+                      )}
+                    </div>
+                    <span className="font-mono font-bold text-white text-xs">
+                      ${displayLiveUsdt.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  {onRefreshLiveWallet && (
+                    <button
+                      onClick={onRefreshLiveWallet}
+                      disabled={isLoadingLiveWallet}
+                      title="ซิงก์ยอดเงินกระเป๋าจริง (Spot + Futures)"
+                      className="text-amber-400 hover:text-white p-1 rounded hover:bg-amber-500/20 transition ml-0.5"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isLoadingLiveWallet ? 'animate-spin' : ''}`} />
+                    </button>
+                  )}
+                </div>
+              );
+            })()
           )}
 
           {/* Quick Bot Toggle Button */}

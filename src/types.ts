@@ -258,15 +258,19 @@ export interface FuturesAssetItem {
 export interface BinanceWalletData {
   spotBalances: SpotBalanceItem[];
   totalSpotUsd: number;
+  spotUsdtFree?: number;
   futuresAssets: FuturesAssetItem[];
   futuresPositions: FuturesPositionItem[];
+  futuresUsdtAvailable?: number;
   totalFuturesMarginUsd: number;
   totalFuturesUnrealizedPnl: number;
   totalFuturesEquityUsd: number;
   totalNetWorthUsd: number;
+  combinedAvailableUsdt?: number;
   canTrade: boolean;
   accountType?: string;
   lastUpdated: number;
+  isCached?: boolean;
 }
 
 export interface BinanceLiveTradeItem {

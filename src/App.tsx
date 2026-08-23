@@ -35,6 +35,7 @@ import {
   sendManualOrderToServer,
   closePositionOnServer,
   clearBotServerLogs,
+  clearBotServerTradeHistory,
   resetBotServerPaperAccount,
   saveBinanceKeysToServer,
   fetchTelegramConfig,
@@ -307,28 +308,37 @@ export default function App() {
     }
   }, [binanceKeys]);
 
-  // Auto-refresh live wallet every 30 seconds if API keys present
+  // Auto-refresh live wallet every 45 seconds if API keys present
   useEffect(() => {
     if (binanceKeys.apiKey && binanceKeys.apiSecret) {
       refreshLiveWallet();
-      const walletInterval = setInterval(refreshLiveWallet, 30000);
+      const walletInterval = setInterval(refreshLiveWallet, 45000);
       return () => clearInterval(walletInterval);
     }
   }, [binanceKeys, refreshLiveWallet]);
 
-  // Initial Load & Safe Fallback Intervals (30s interval for responsive updates without Rate Limits)
+  // Initial Load & Safe Fallback Intervals (Optimized for 1h, 4h, 1d to prevent Rate Limit)
   useEffect(() => {
     loadCandles();
     loadTickers();
 
-    const candleInterval = setInterval(loadCandles, 30000);
-    const tickerInterval = setInterval(loadTickers, 30000);
+    // Higher timeframes (1h, 4h, 1d) update slower so we use larger poll intervals to preserve rate limit
+    const candlePollMs = (chartTimeframe === '1d' || chartTimeframe === '1w')
+      ? 60000
+      : chartTimeframe === '4h'
+        ? 60000
+        : chartTimeframe === '1h'
+          ? 45000
+          : 30000;
+
+    const candleInterval = setInterval(loadCandles, candlePollMs);
+    const tickerInterval = setInterval(loadTickers, 60000); // 60s fallback as WebSocket updates live prices
 
     return () => {
       clearInterval(candleInterval);
       clearInterval(tickerInterval);
     };
-  }, [loadCandles, loadTickers]);
+  }, [loadCandles, loadTickers, chartTimeframe]);
 
   // Real-time PnL update effect for ALL open positions when ticker prices update
   useEffect(() => {
@@ -572,6 +582,9 @@ export default function App() {
         setActiveTab={setActiveTab}
         botConfig={botConfig}
         paperAccount={paperAccount}
+        liveWallet={liveWalletData}
+        onRefreshLiveWallet={refreshLiveWallet}
+        isLoadingLiveWallet={isLoadingLiveWallet}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenTelegramSettings={() => setIsTelegramModalOpen(true)}
         isTelegramEnabled={telegramConfig.enabled}
@@ -710,10 +723,18 @@ export default function App() {
         {activeTab === 'history' && (
           <TradeHistoryTable
             trades={tradeHistory}
-            onClearHistory={() => {
+            onClearHistory={async () => {
               localStorage.removeItem('cdc_trade_history_v2');
+              await clearBotServerTradeHistory('PAPER');
               setTradeHistory([]);
-              showToast('ล้างประวัติการเทรดแล้ว', 'info');
+              showToast('ล้างประวัติการเทรดพอร์ตจำลองแล้ว', 'info');
+            }}
+            onClearLiveHistory={async () => {
+              await clearBotServerTradeHistory('BINANCE_LIVE');
+              const remaining = tradeHistory.filter((t) => t.mode !== 'BINANCE_LIVE');
+              setTradeHistory(remaining);
+              saveTradeHistory(remaining);
+              showToast('ลบประวัติคำสั่งซื้อขายจริง (Binance Live Log) เรียบร้อยแล้ว', 'info');
             }}
             activePositions={paperAccount.activePositions}
             onClosePosition={handleCloseSpecificPosition}

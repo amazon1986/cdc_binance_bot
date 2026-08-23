@@ -6,17 +6,35 @@ const BINANCE_PUBLIC_BASE = 'https://api.binance.com/api/v3';
 interface CacheItem<T> {
   data: T;
   expiry: number;
-}
-const klineClientCache = new Map<string, CacheItem<KlineData[]>>();
-let tickerClientCache: CacheItem<BinanceTicker24h[]> | null = null;
+}// Cached data containers with TTL to prevent Binance API 429/418 Rate Limit bans
+const klineClientCache = new Map<string, { data: KlineData[]; expiry: number }>();
+let tickerClientCache: { data: BinanceTicker24h[]; expiry: number } | null = null;
 let clientBannedUntil = 0;
 
 export function getClientBannedUntil(): number {
   return clientBannedUntil;
 }
 
-export function setClientBannedUntil(timestamp: number) {
-  clientBannedUntil = Math.max(clientBannedUntil, timestamp);
+export function setClientBannedUntil(time: number) {
+  clientBannedUntil = time;
+}
+
+/**
+ * Returns optimal cache TTL in milliseconds based on timeframe.
+ * Higher timeframes (1h, 4h, 1d) change slowly, allowing longer caching to save API quota.
+ */
+function getTimeframeCacheTtl(interval: Timeframe): number {
+  switch (interval) {
+    case '1d':
+    case '1w':
+      return 180000; // 3 minutes for Daily / Weekly
+    case '4h':
+      return 120000; // 2 minutes for 4-Hour
+    case '1h':
+      return 60000;  // 1 minute for 1-Hour
+    default:
+      return 30000;  // 30 seconds for short timeframes (1m-15m)
+  }
 }
 
 /**
@@ -31,61 +49,73 @@ export async function fetchBinanceKlines(
   const formattedSymbol = symbol.toUpperCase().replace('/', '');
   const cacheKey = `${formattedSymbol}_${interval}_${limit}`;
   const now = Date.now();
+  const ttl = getTimeframeCacheTtl(interval);
 
   const cached = klineClientCache.get(cacheKey);
   if (cached && now < cached.expiry) {
     return cached.data;
   }
 
-  // Check if currently under Rate Limit / Ban cooldown
+  // If currently under Rate Limit / Ban cooldown, return cached data if available
   if (now < clientBannedUntil) {
     if (cached) return cached.data;
     return [];
   }
 
-  const url = `${BINANCE_PUBLIC_BASE}/klines?symbol=${formattedSymbol}&interval=${interval}&limit=${limit}`;
-
   try {
-    let response = await fetch(url);
+    // Prefer server proxy first to leverage central backend caching and avoid client IP rate limiting
+    let response = await fetch(`/api/binance/klines?symbol=${formattedSymbol}&interval=${interval}&limit=${limit}`);
+    
     if (!response.ok) {
-      if (response.status === 418 || response.status === 429) {
-        setClientBannedUntil(now + 60000); // 1 min cooldown
+      // Fallback to direct Binance public endpoint if backend proxy is unavailable
+      const url = `${BINANCE_PUBLIC_BASE}/klines?symbol=${formattedSymbol}&interval=${interval}&limit=${limit}`;
+      response = await fetch(url);
+      if (!response.ok && (response.status === 418 || response.status === 429)) {
+        setClientBannedUntil(now + 60000);
       }
-      // Try backend proxy
-      response = await fetch(`/api/binance/klines?symbol=${formattedSymbol}&interval=${interval}&limit=${limit}`);
     }
 
     if (!response.ok) {
+      if (cached) return cached.data;
       throw new Error(`Failed to fetch Binance Klines: ${response.statusText}`);
     }
 
     const data = await response.json();
+    if (data.error && (data.bannedUntil || response.status === 429)) {
+      if (data.bannedUntil) setClientBannedUntil(data.bannedUntil);
+      if (cached) return cached.data;
+      return [];
+    }
 
-    // Binance kline array format:
-    // [ [openTime, open, high, low, close, volume, closeTime, quoteAssetVolume, tradesCount, ...], ... ]
-    const result: KlineData[] = data.map((item: (string | number)[]) => ({
-      time: Number(item[0]),
-      open: parseFloat(item[1] as string),
-      high: parseFloat(item[2] as string),
-      low: parseFloat(item[3] as string),
-      close: parseFloat(item[4] as string),
-      volume: parseFloat(item[5] as string),
-    }));
+    const array = Array.isArray(data) ? data : [];
+    if (array.length === 0 && cached) return cached.data;
 
-    klineClientCache.set(cacheKey, { data: result, expiry: now + 30000 }); // 30s TTL
+    const result: KlineData[] = array.map((item: any) => {
+      // Check if response is already formatted { time, open, high, low, close, volume } or raw Binance array
+      if (typeof item === 'object' && !Array.isArray(item) && item.time !== undefined) {
+        return {
+          time: Number(item.time),
+          open: parseFloat(item.open),
+          high: parseFloat(item.high),
+          low: parseFloat(item.low),
+          close: parseFloat(item.close),
+          volume: parseFloat(item.volume || 0),
+        };
+      }
+      return {
+        time: Number(item[0]),
+        open: parseFloat(item[1] as string),
+        high: parseFloat(item[2] as string),
+        low: parseFloat(item[3] as string),
+        close: parseFloat(item[4] as string),
+        volume: parseFloat(item[5] as string),
+      };
+    });
+
+    klineClientCache.set(cacheKey, { data: result, expiry: now + ttl });
     return result;
   } catch (error) {
-    console.warn('Direct Binance fetch failed, attempting server proxy...', error);
-    try {
-      const proxyRes = await fetch(`/api/binance/klines?symbol=${formattedSymbol}&interval=${interval}&limit=${limit}`);
-      if (proxyRes.ok) {
-        const proxyData = await proxyRes.json();
-        klineClientCache.set(cacheKey, { data: proxyData, expiry: now + 30000 });
-        return proxyData;
-      }
-    } catch (proxyErr) {
-      console.error('Proxy fetch also failed:', proxyErr);
-    }
+    console.warn('Kline fetch failed, falling back to cache...', error);
     if (cached) return cached.data;
     return [];
   }
@@ -93,6 +123,7 @@ export async function fetchBinanceKlines(
 
 /**
  * Fetches 24h ticker info for a symbol or top symbols.
+ * Caches centrally for 60 seconds to avoid burning Binance rate limits.
  */
 export async function fetchBinanceTicker24h(symbol?: string): Promise<BinanceTicker24h[]> {
   const now = Date.now();
@@ -106,35 +137,45 @@ export async function fetchBinanceTicker24h(symbol?: string): Promise<BinanceTic
 
   try {
     const formattedSymbol = symbol ? symbol.toUpperCase().replace('/', '') : '';
-    const url = formattedSymbol
-      ? `${BINANCE_PUBLIC_BASE}/ticker/24hr?symbol=${formattedSymbol}`
-      : `${BINANCE_PUBLIC_BASE}/ticker/24hr`;
+    // Prefer backend proxy with central cache to share load
+    let response = await fetch(`/api/binance/ticker24h${formattedSymbol ? `?symbol=${formattedSymbol}` : ''}`);
 
-    let response = await fetch(url);
     if (!response.ok) {
-      if (response.status === 418 || response.status === 429) {
+      const url = formattedSymbol
+        ? `${BINANCE_PUBLIC_BASE}/ticker/24hr?symbol=${formattedSymbol}`
+        : `${BINANCE_PUBLIC_BASE}/ticker/24hr`;
+      response = await fetch(url);
+      if (!response.ok && (response.status === 418 || response.status === 429)) {
         setClientBannedUntil(now + 60000);
       }
-      response = await fetch(`/api/binance/ticker24h${formattedSymbol ? `?symbol=${formattedSymbol}` : ''}`);
     }
 
-    if (!response.ok) throw new Error('Ticker fetch failed');
+    if (!response.ok) {
+      if (tickerClientCache) return tickerClientCache.data;
+      throw new Error('Ticker fetch failed');
+    }
 
     const data = await response.json();
+    if (data.error && (data.bannedUntil || response.status === 429)) {
+      if (data.bannedUntil) setClientBannedUntil(data.bannedUntil);
+      if (tickerClientCache) return tickerClientCache.data;
+      return [];
+    }
+
     const array = Array.isArray(data) ? data : [data];
 
     const result: BinanceTicker24h[] = array.map((t: any) => ({
       symbol: t.symbol,
-      lastPrice: parseFloat(t.lastPrice),
-      priceChangePercent: parseFloat(t.priceChangePercent),
-      highPrice: parseFloat(t.highPrice),
-      lowPrice: parseFloat(t.lowPrice),
-      volume: parseFloat(t.volume),
-      quoteVolume: parseFloat(t.quoteVolume),
+      lastPrice: parseFloat(t.lastPrice || 0),
+      priceChangePercent: parseFloat(t.priceChangePercent || 0),
+      highPrice: parseFloat(t.highPrice || 0),
+      lowPrice: parseFloat(t.lowPrice || 0),
+      volume: parseFloat(t.volume || 0),
+      quoteVolume: parseFloat(t.quoteVolume || 0),
     }));
 
     if (!symbol) {
-      tickerClientCache = { data: result, expiry: now + 30000 }; // 30s TTL
+      tickerClientCache = { data: result, expiry: now + 60000 }; // 60s TTL
     }
 
     return result;
@@ -354,8 +395,18 @@ export async function executeLiveBinanceOrder(params: {
   }
 }
 
+const WALLET_CACHE_KEY = 'cdc_binance_cached_wallet_v2';
+let inMemoryWalletCache: import('../types').BinanceWalletData | null = (() => {
+  try {
+    const saved = localStorage.getItem(WALLET_CACHE_KEY);
+    return saved ? JSON.parse(saved) : null;
+  } catch {
+    return null;
+  }
+})();
+
 /**
- * Fetches real account USDT balance from Binance signed endpoint (Spot or Futures)
+ * Fetches real account USDT balance from Binance signed endpoint (Spot + Futures combined)
  */
 export async function fetchLiveBinanceUsdtBalance(keys: {
   apiKey: string;
@@ -365,26 +416,36 @@ export async function fetchLiveBinanceUsdtBalance(keys: {
 }): Promise<number | null> {
   if (!keys.apiKey || !keys.apiSecret) return null;
   try {
-    const endpoint = keys.marketType === 'FUTURES' ? '/api/binance/futures/account' : '/api/binance/account';
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(keys),
-    });
+    const walletRes = await fetchFullBinanceWallet(keys);
+    if (walletRes.success && walletRes.data) {
+      const spotFree = walletRes.data.spotUsdtFree || 0;
+      const futAvail = walletRes.data.futuresUsdtAvailable || 0;
+      const combined = walletRes.data.combinedAvailableUsdt || (spotFree + futAvail);
 
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (!data.success) return null;
-
-    if (keys.marketType === 'FUTURES') {
-      const usdt = (data.assets || []).find((a: any) => a.asset === 'USDT');
-      return usdt ? parseFloat(usdt.availableBalance || usdt.walletBalance) : 0;
+      if (keys.marketType === 'SPOT') {
+        // If Spot has USDT return Spot, otherwise fallback to Futures or combined
+        return spotFree > 0 ? spotFree : (combined > 0 ? combined : 0);
+      } else {
+        // If Futures has USDT return Futures, otherwise fallback to Spot or combined
+        return futAvail > 0 ? futAvail : (combined > 0 ? combined : 0);
+      }
     }
 
-    const usdt = (data.balances || []).find((b: any) => b.asset === 'USDT');
-    return usdt ? parseFloat(usdt.free) : 0;
+    if (inMemoryWalletCache) {
+      const spotFree = inMemoryWalletCache.spotUsdtFree || 0;
+      const futAvail = inMemoryWalletCache.futuresUsdtAvailable || 0;
+      return keys.marketType === 'SPOT'
+        ? (spotFree > 0 ? spotFree : futAvail)
+        : (futAvail > 0 ? futAvail : spotFree);
+    }
+    return null;
   } catch (err) {
     console.error('Failed to fetch live USDT balance:', err);
+    if (inMemoryWalletCache) {
+      const spotFree = inMemoryWalletCache.spotUsdtFree || 0;
+      const futAvail = inMemoryWalletCache.futuresUsdtAvailable || 0;
+      return spotFree + futAvail;
+    }
     return null;
   }
 }
@@ -446,7 +507,7 @@ export async function executeLiveBinanceFuturesOrder(params: {
 
 /**
  * Fetches comprehensive Binance Wallet data (Spot Balances + Futures Assets & Positions)
- * and calculates USD market valuation for every held coin.
+ * and calculates USD market valuation for every held coin, automatically combining Spot + Futures.
  */
 export async function fetchFullBinanceWallet(keys: {
   apiKey: string;
@@ -463,19 +524,36 @@ export async function fetchFullBinanceWallet(keys: {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(keys),
-    }).then(async (res) => (res.ok ? res.json() : { error: (await res.json()).error || 'Spot failed' }));
+    }).then(async (res) => (res.ok ? res.json() : { error: (await res.json()).error || 'Spot failed' }))
+      .catch((err) => ({ error: err.message }));
 
     // 2. Fetch Futures Account Balances & Positions
     const futuresPromise = fetch('/api/binance/futures/account', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(keys),
-    }).then(async (res) => (res.ok ? res.json() : { error: (await res.json()).error || 'Futures failed' }));
+    }).then(async (res) => (res.ok ? res.json() : { error: (await res.json()).error || 'Futures failed' }))
+      .catch((err) => ({ error: err.message }));
 
     // 3. Fetch 24h Tickers for Price Conversion
     const tickersPromise = fetchBinanceTicker24h();
 
     const [spotRes, futuresRes, tickers] = await Promise.all([spotPromise, futuresPromise, tickersPromise]);
+
+    const hasSpotError = Boolean(spotRes?.error);
+    const hasFuturesError = Boolean(futuresRes?.error);
+
+    // If both failed (e.g. Rate Limit / Ban cooldown) and we have cached data, return the cached data gracefully!
+    if (hasSpotError && hasFuturesError && inMemoryWalletCache) {
+      return {
+        success: true,
+        data: {
+          ...inMemoryWalletCache,
+          isCached: true,
+          lastUpdated: inMemoryWalletCache.lastUpdated || Date.now(),
+        },
+      };
+    }
 
     const tickerMap = new Map<string, { price: number; change24h: number }>();
     for (const t of tickers) {
@@ -484,150 +562,201 @@ export async function fetchFullBinanceWallet(keys: {
 
     const stableCoins = new Set(['USDT', 'USDC', 'FDUSD', 'BUSD', 'DAI', 'TUSD', 'USD']);
 
-    // Process Spot Balances
-    const rawBalances: { asset: string; free: string; locked: string }[] = spotRes.balances || [];
-    const spotBalances: import('../types').SpotBalanceItem[] = [];
+    // Process Spot Balances (or fallback to previous spot cache if spot failed)
+    let rawBalances: { asset: string; free: string; locked: string }[] = spotRes.balances || [];
+    let spotBalances: import('../types').SpotBalanceItem[] = [];
     let totalSpotUsd = 0;
+    let spotUsdtFree = 0;
 
-    for (const b of rawBalances) {
-      const free = parseFloat(b.free) || 0;
-      const locked = parseFloat(b.locked) || 0;
-      const total = free + locked;
-      if (total <= 0) continue;
+    if (hasSpotError && inMemoryWalletCache) {
+      spotBalances = inMemoryWalletCache.spotBalances || [];
+      totalSpotUsd = inMemoryWalletCache.totalSpotUsd || 0;
+      spotUsdtFree = inMemoryWalletCache.spotUsdtFree || 0;
+    } else {
+      for (const b of rawBalances) {
+        const free = parseFloat(b.free) || 0;
+        const locked = parseFloat(b.locked) || 0;
+        const total = free + locked;
+        if (total <= 0) continue;
 
-      let usdPrice = 0;
-      let priceChange24h = 0;
-
-      if (stableCoins.has(b.asset.toUpperCase())) {
-        usdPrice = 1.0;
-        priceChange24h = 0;
-      } else {
-        const symbolUsdt = `${b.asset.toUpperCase()}USDT`;
-        const symbolBtc = `${b.asset.toUpperCase()}BTC`;
-        const btcUsdt = tickerMap.get('BTCUSDT')?.price || 0;
-
-        if (tickerMap.has(symbolUsdt)) {
-          const tInfo = tickerMap.get(symbolUsdt)!;
-          usdPrice = tInfo.price;
-          priceChange24h = tInfo.change24h;
-        } else if (tickerMap.has(symbolBtc) && btcUsdt > 0) {
-          const tInfo = tickerMap.get(symbolBtc)!;
-          usdPrice = tInfo.price * btcUsdt;
-          priceChange24h = tInfo.change24h;
+        if (b.asset.toUpperCase() === 'USDT') {
+          spotUsdtFree = free;
         }
+
+        let usdPrice = 0;
+        let priceChange24h = 0;
+
+        if (stableCoins.has(b.asset.toUpperCase())) {
+          usdPrice = 1.0;
+          priceChange24h = 0;
+        } else {
+          const symbolUsdt = `${b.asset.toUpperCase()}USDT`;
+          const symbolBtc = `${b.asset.toUpperCase()}BTC`;
+          const btcUsdt = tickerMap.get('BTCUSDT')?.price || 0;
+
+          if (tickerMap.has(symbolUsdt)) {
+            const tInfo = tickerMap.get(symbolUsdt)!;
+            usdPrice = tInfo.price;
+            priceChange24h = tInfo.change24h;
+          } else if (tickerMap.has(symbolBtc) && btcUsdt > 0) {
+            const tInfo = tickerMap.get(symbolBtc)!;
+            usdPrice = tInfo.price * btcUsdt;
+            priceChange24h = tInfo.change24h;
+          }
+        }
+
+        const usdValue = total * usdPrice;
+        totalSpotUsd += usdValue;
+
+        spotBalances.push({
+          asset: b.asset,
+          free,
+          locked,
+          total,
+          usdPrice,
+          usdValue,
+          priceChange24h,
+        });
       }
 
-      const usdValue = total * usdPrice;
-      totalSpotUsd += usdValue;
+      // Sort by USD value descending
+      spotBalances.sort((a, b) => b.usdValue - a.usdValue);
 
-      spotBalances.push({
-        asset: b.asset,
-        free,
-        locked,
-        total,
-        usdPrice,
-        usdValue,
-        priceChange24h,
-      });
-    }
-
-    // Sort by USD value descending
-    spotBalances.sort((a, b) => b.usdValue - a.usdValue);
-
-    // Calculate percent of spot portfolio
-    for (const item of spotBalances) {
-      item.percentOfPortfolio = totalSpotUsd > 0 ? (item.usdValue / totalSpotUsd) * 100 : 0;
-    }
-
-    // Process Futures Assets & Positions
-    const rawFuturesAssets: any[] = futuresRes.assets || [];
-    const rawFuturesPositions: any[] = futuresRes.positions || [];
-
-    const futuresAssets: import('../types').FuturesAssetItem[] = rawFuturesAssets.map((a) => ({
-      asset: a.asset,
-      walletBalance: parseFloat(a.walletBalance) || 0,
-      unrealizedProfit: parseFloat(a.unrealizedProfit) || 0,
-      marginBalance: parseFloat(a.marginBalance) || 0,
-      maintMargin: parseFloat(a.maintMargin) || 0,
-      initialMargin: parseFloat(a.initialMargin) || 0,
-      positionInitialMargin: parseFloat(a.positionInitialMargin) || 0,
-      openOrderInitialMargin: parseFloat(a.openOrderInitialMargin) || 0,
-      crossWalletBalance: parseFloat(a.crossWalletBalance) || 0,
-      crossUnPnl: parseFloat(a.crossUnPnl) || 0,
-      availableBalance: parseFloat(a.availableBalance) || 0,
-      maxWithdrawAmount: parseFloat(a.maxWithdrawAmount) || 0,
-    })).filter((a) => a.walletBalance > 0 || a.marginBalance > 0 || a.unrealizedProfit !== 0);
-
-    const futuresPositions: import('../types').FuturesPositionItem[] = rawFuturesPositions.map((p) => {
-      const positionAmt = parseFloat(p.positionAmt) || 0;
-      const entryPrice = parseFloat(p.entryPrice) || 0;
-      const markPrice = parseFloat(p.markPrice) || 0;
-      const unrealizedProfit = parseFloat(p.unRealizedProfit || p.unrealizedProfit) || 0;
-      const initialMargin = parseFloat(p.initialMargin) || 0;
-      const leverage = parseFloat(p.leverage) || 1;
-      const notional = Math.abs(positionAmt * markPrice);
-
-      let pnlPercent = 0;
-      if (initialMargin > 0) {
-        pnlPercent = (unrealizedProfit / initialMargin) * 100;
-      } else if (entryPrice > 0) {
-        pnlPercent = positionAmt >= 0
-          ? ((markPrice - entryPrice) / entryPrice) * 100 * leverage
-          : ((entryPrice - markPrice) / entryPrice) * 100 * leverage;
+      // Calculate percent of spot portfolio
+      for (const item of spotBalances) {
+        item.percentOfPortfolio = totalSpotUsd > 0 ? (item.usdValue / totalSpotUsd) * 100 : 0;
       }
+    }
 
-      const liqPrice = parseFloat(p.liquidationPrice) || 0;
-
-      return {
-        symbol: p.symbol,
-        initialMargin,
-        maintMargin: parseFloat(p.maintMargin) || 0,
-        unrealizedProfit,
-        positionInitialMargin: parseFloat(p.positionInitialMargin) || 0,
-        openOrderInitialMargin: parseFloat(p.openOrderInitialMargin) || 0,
-        leverage,
-        isolated: !!p.isolated,
-        entryPrice,
-        markPrice,
-        breakEvenPrice: parseFloat(p.breakEvenPrice) || entryPrice,
-        positionSide: p.positionSide || (positionAmt >= 0 ? 'LONG' : 'SHORT'),
-        positionAmt,
-        notional,
-        liquidationPrice: liqPrice > 0 ? liqPrice : undefined,
-        pnlPercent,
-      };
-    }).filter((p) => Math.abs(p.positionAmt) > 0);
-
+    // Process Futures Assets & Positions (or fallback to previous futures cache if futures failed)
+    let futuresAssets: import('../types').FuturesAssetItem[] = [];
+    let futuresPositions: import('../types').FuturesPositionItem[] = [];
     let totalFuturesMarginUsd = 0;
     let totalFuturesUnrealizedPnl = 0;
     let totalFuturesEquityUsd = 0;
+    let futuresUsdtAvailable = 0;
 
-    for (const fa of futuresAssets) {
-      totalFuturesMarginUsd += fa.walletBalance;
-      totalFuturesUnrealizedPnl += fa.unrealizedProfit;
-      totalFuturesEquityUsd += fa.marginBalance;
+    if (hasFuturesError && inMemoryWalletCache) {
+      futuresAssets = inMemoryWalletCache.futuresAssets || [];
+      futuresPositions = inMemoryWalletCache.futuresPositions || [];
+      totalFuturesMarginUsd = inMemoryWalletCache.totalFuturesMarginUsd || 0;
+      totalFuturesUnrealizedPnl = inMemoryWalletCache.totalFuturesUnrealizedPnl || 0;
+      totalFuturesEquityUsd = inMemoryWalletCache.totalFuturesEquityUsd || 0;
+      futuresUsdtAvailable = inMemoryWalletCache.futuresUsdtAvailable || 0;
+    } else {
+      const rawFuturesAssets: any[] = futuresRes.assets || [];
+      const rawFuturesPositions: any[] = futuresRes.positions || [];
+
+      futuresAssets = rawFuturesAssets.map((a) => {
+        const walletBal = parseFloat(a.walletBalance) || 0;
+        const availBal = parseFloat(a.availableBalance) || 0;
+        if (a.asset.toUpperCase() === 'USDT') {
+          futuresUsdtAvailable = availBal > 0 ? availBal : walletBal;
+        }
+        return {
+          asset: a.asset,
+          walletBalance: walletBal,
+          unrealizedProfit: parseFloat(a.unrealizedProfit) || 0,
+          marginBalance: parseFloat(a.marginBalance) || 0,
+          maintMargin: parseFloat(a.maintMargin) || 0,
+          initialMargin: parseFloat(a.initialMargin) || 0,
+          positionInitialMargin: parseFloat(a.positionInitialMargin) || 0,
+          openOrderInitialMargin: parseFloat(a.openOrderInitialMargin) || 0,
+          crossWalletBalance: parseFloat(a.crossWalletBalance) || 0,
+          crossUnPnl: parseFloat(a.crossUnPnl) || 0,
+          availableBalance: availBal,
+          maxWithdrawAmount: parseFloat(a.maxWithdrawAmount) || 0,
+        };
+      }).filter((a) => a.walletBalance > 0 || a.marginBalance > 0 || a.unrealizedProfit !== 0);
+
+      futuresPositions = rawFuturesPositions.map((p) => {
+        const positionAmt = parseFloat(p.positionAmt) || 0;
+        const entryPrice = parseFloat(p.entryPrice) || 0;
+        const markPrice = parseFloat(p.markPrice) || 0;
+        const unrealizedProfit = parseFloat(p.unRealizedProfit || p.unrealizedProfit) || 0;
+        const initialMargin = parseFloat(p.initialMargin) || 0;
+        const leverage = parseFloat(p.leverage) || 1;
+        const notional = Math.abs(positionAmt * markPrice);
+
+        let pnlPercent = 0;
+        if (initialMargin > 0) {
+          pnlPercent = (unrealizedProfit / initialMargin) * 100;
+        } else if (entryPrice > 0) {
+          pnlPercent = positionAmt >= 0
+            ? ((markPrice - entryPrice) / entryPrice) * 100 * leverage
+            : ((entryPrice - markPrice) / entryPrice) * 100 * leverage;
+        }
+
+        const liqPrice = parseFloat(p.liquidationPrice) || 0;
+
+        return {
+          symbol: p.symbol,
+          initialMargin,
+          maintMargin: parseFloat(p.maintMargin) || 0,
+          unrealizedProfit,
+          positionInitialMargin: parseFloat(p.positionInitialMargin) || 0,
+          openOrderInitialMargin: parseFloat(p.openOrderInitialMargin) || 0,
+          leverage,
+          isolated: !!p.isolated,
+          entryPrice,
+          markPrice,
+          breakEvenPrice: parseFloat(p.breakEvenPrice) || entryPrice,
+          positionSide: p.positionSide || (positionAmt >= 0 ? 'LONG' : 'SHORT'),
+          positionAmt,
+          notional,
+          liquidationPrice: liqPrice > 0 ? liqPrice : undefined,
+          pnlPercent,
+        };
+      }).filter((p) => Math.abs(p.positionAmt) > 0);
+
+      for (const fa of futuresAssets) {
+        totalFuturesMarginUsd += fa.walletBalance;
+        totalFuturesUnrealizedPnl += fa.unrealizedProfit;
+        totalFuturesEquityUsd += fa.marginBalance;
+      }
     }
 
     const totalNetWorthUsd = totalSpotUsd + totalFuturesEquityUsd;
+    const combinedAvailableUsdt = spotUsdtFree + futuresUsdtAvailable;
+
+    const fullData: import('../types').BinanceWalletData = {
+      spotBalances,
+      totalSpotUsd,
+      spotUsdtFree,
+      futuresAssets,
+      futuresPositions,
+      futuresUsdtAvailable,
+      totalFuturesMarginUsd,
+      totalFuturesUnrealizedPnl,
+      totalFuturesEquityUsd,
+      totalNetWorthUsd,
+      combinedAvailableUsdt,
+      canTrade: spotRes.canTrade !== undefined ? spotRes.canTrade : (futuresRes.canTrade || false),
+      accountType: spotRes.accountType || (futuresRes.feeTier !== undefined ? 'FUTURES' : 'SPOT'),
+      lastUpdated: Date.now(),
+      isCached: hasSpotError || hasFuturesError,
+    };
+
+    // Save to persistent cache so subsequent renders/reloads never drop to 0
+    inMemoryWalletCache = fullData;
+    try {
+      localStorage.setItem(WALLET_CACHE_KEY, JSON.stringify(fullData));
+    } catch {
+      // Ignore localStorage quote limits
+    }
 
     return {
       success: true,
-      data: {
-        spotBalances,
-        totalSpotUsd,
-        futuresAssets,
-        futuresPositions,
-        totalFuturesMarginUsd,
-        totalFuturesUnrealizedPnl,
-        totalFuturesEquityUsd,
-        totalNetWorthUsd,
-        canTrade: spotRes.canTrade !== undefined ? spotRes.canTrade : (futuresRes.canTrade || false),
-        accountType: spotRes.accountType || (futuresRes.feeTier !== undefined ? 'FUTURES' : 'SPOT'),
-        lastUpdated: Date.now(),
-      },
+      data: fullData,
     };
   } catch (err: any) {
     console.error('Error fetching full Binance wallet:', err);
+    if (inMemoryWalletCache) {
+      return {
+        success: true,
+        data: { ...inMemoryWalletCache, isCached: true },
+      };
+    }
     return { success: false, error: err.message || 'เกิดข้อผิดพลาดในการดึงข้อมูลกระเป๋า Binance' };
   }
 }

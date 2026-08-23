@@ -113,6 +113,23 @@ export async function clearBotServerLogs(): Promise<boolean> {
 }
 
 /**
+ * Clears trade history records on the server.
+ */
+export async function clearBotServerTradeHistory(mode?: 'ALL' | 'BINANCE_LIVE' | 'PAPER'): Promise<boolean> {
+  try {
+    const res = await fetch('/api/bot/clear-history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: mode || 'ALL' }),
+    });
+    const data = await res.json();
+    return !!data.success;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Resets paper trading balance on the server.
  */
 export async function resetBotServerPaperAccount(): Promise<boolean> {

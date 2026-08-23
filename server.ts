@@ -238,6 +238,22 @@ const serverKlineCache = new Map<string, ServerCacheItem<KlineData[]>>();
 let serverTickerCache: ServerCacheItem<any[]> | null = null;
 const serverDepthCache = new Map<string, ServerCacheItem<any>>();
 const serverExchangeInfoCache = new Map<string, ServerCacheItem<any>>();
+const serverAccountCache = new Map<string, ServerCacheItem<any>>();
+const serverFuturesAccountCache = new Map<string, ServerCacheItem<any>>();
+
+function getServerTimeframeCacheTtl(interval: string): number {
+  switch (interval) {
+    case '1d':
+    case '1w':
+      return 180000; // 3 min for 1d/1w
+    case '4h':
+      return 120000; // 2 min for 4h
+    case '1h':
+      return 60000;  // 1 min for 1h
+    default:
+      return 30000;  // 30s
+  }
+}
 
 function handleBinanceRateLimitError(status: number, data: any, endpointName = 'API') {
   if (status === 418 || status === 429) {
@@ -265,6 +281,7 @@ function handleBinanceRateLimitError(status: number, data: any, endpointName = '
 async function fetchKlinesDirect(symbol: string, interval: string, limit = 300): Promise<KlineData[]> {
   const cacheKey = `${symbol}_${interval}_${limit}`;
   const now = Date.now();
+  const ttl = getServerTimeframeCacheTtl(interval);
   const cached = serverKlineCache.get(cacheKey);
   if (cached && now < cached.expiry) {
     return cached.data;
@@ -298,7 +315,7 @@ async function fetchKlinesDirect(symbol: string, interval: string, limit = 300):
       volume: parseFloat(d[5]),
     }));
 
-    serverKlineCache.set(cacheKey, { data: result, expiry: now + 30000 }); // 30s TTL
+    serverKlineCache.set(cacheKey, { data: result, expiry: now + ttl });
     return result;
   } catch (err) {
     if (cached) return cached.data;
@@ -1231,6 +1248,27 @@ app.post('/api/bot/clear-logs', (req, res) => {
   return res.json({ success: true });
 });
 
+// 6.1 Clear Trade History on Server
+app.post('/api/bot/clear-history', (req, res) => {
+  try {
+    const { mode } = req.body || {};
+    if (mode === 'BINANCE_LIVE') {
+      serverState.tradeHistory = serverState.tradeHistory.filter((t) => t.mode !== 'BINANCE_LIVE');
+      addServerLog('🗑️ ลบประวัติคำสั่งซื้อขายจริง (Binance Live Trade Log) บนเซิร์ฟเวอร์เรียบร้อยแล้ว');
+    } else if (mode === 'PAPER') {
+      serverState.tradeHistory = serverState.tradeHistory.filter((t) => t.mode === 'BINANCE_LIVE');
+      addServerLog('🗑️ ลบประวัติการเทรดพอร์ตจำลอง (Paper Trade Log) บนเซิร์ฟเวอร์เรียบร้อยแล้ว');
+    } else {
+      serverState.tradeHistory = [];
+      addServerLog('🗑️ ลบประวัติการส่งคำสั่งซื้อขายทั้งหมดบนเซิร์ฟเวอร์เรียบร้อยแล้ว');
+    }
+    saveServerState();
+    return res.json({ success: true, tradeHistory: serverState.tradeHistory });
+  } catch (err: any) {
+    return res.status(500).json({ error: sanitizeErrorMessage(err) });
+  }
+});
+
 // 7. Reset Paper Account
 app.post('/api/bot/reset-paper', (req, res) => {
   serverState.paperAccount = {
@@ -1375,6 +1413,7 @@ app.get('/api/binance/klines', async (req, res) => {
 
     const cacheKey = `${symbol}_${interval}_${limit}`;
     const now = Date.now();
+    const ttl = getServerTimeframeCacheTtl(interval);
     const cached = serverKlineCache.get(cacheKey);
     if (cached && now < cached.expiry) {
       return res.json(cached.data);
@@ -1394,7 +1433,7 @@ app.get('/api/binance/klines', async (req, res) => {
       return res.status(response.status).json({ error: 'Binance API request failed', details: errText });
     }
     const data = await response.json();
-    serverKlineCache.set(cacheKey, { data, expiry: now + 30000 }); // 30s TTL
+    serverKlineCache.set(cacheKey, { data, expiry: now + ttl });
     return res.json(data);
   } catch (error: any) {
     return res.status(500).json({ error: sanitizeErrorMessage(error) });
@@ -1429,7 +1468,7 @@ app.get('/api/binance/ticker24h', async (req, res) => {
     }
     const data = await response.json();
     if (!symbol) {
-      serverTickerCache = { data, expiry: now + 30000 }; // 30s TTL
+      serverTickerCache = { data, expiry: now + 60000 }; // 60s TTL
     }
     return res.json(data);
   } catch (error: any) {
@@ -1547,6 +1586,17 @@ app.post('/api/binance/account', async (req, res) => {
       return res.status(400).json({ error: 'Invalid API credentials' });
     }
 
+    const keyHash = `${apiKey.slice(0, 8)}_${isTestnet ? 'test' : 'live'}`;
+    const now = Date.now();
+    const cached = serverAccountCache.get(keyHash);
+    if (cached && now < cached.expiry) {
+      return res.json(cached.data);
+    }
+
+    if (now < binanceBannedUntil && cached) {
+      return res.json({ ...cached.data, isCached: true });
+    }
+
     const baseUrl = isTestnet
       ? 'https://testnet.binance.vision/api/v3'
       : 'https://api.binance.com/api/v3';
@@ -1561,6 +1611,8 @@ app.post('/api/binance/account', async (req, res) => {
 
     const data = await response.json();
     if (!response.ok) {
+      handleBinanceRateLimitError(response.status, data, 'spot account');
+      if (cached) return res.json({ ...cached.data, isCached: true });
       return res.status(response.status).json({ error: data.msg || 'Binance Account API error' });
     }
 
@@ -1568,12 +1620,15 @@ app.post('/api/binance/account', async (req, res) => {
       (b: any) => parseFloat(b.free) > 0 || parseFloat(b.locked) > 0
     );
 
-    return res.json({
+    const result = {
       success: true,
       canTrade: data.canTrade,
       accountType: data.accountType,
       balances,
-    });
+    };
+
+    serverAccountCache.set(keyHash, { data: result, expiry: now + 20000 }); // 20s TTL
+    return res.json(result);
   } catch (error: any) {
     return res.status(500).json({ error: sanitizeErrorMessage(error) });
   }
@@ -1660,6 +1715,17 @@ app.post('/api/binance/futures/account', async (req, res) => {
       return res.status(400).json({ error: 'Invalid API credentials' });
     }
 
+    const keyHash = `${apiKey.slice(0, 8)}_${isTestnet ? 'test' : 'live'}`;
+    const now = Date.now();
+    const cached = serverFuturesAccountCache.get(keyHash);
+    if (cached && now < cached.expiry) {
+      return res.json(cached.data);
+    }
+
+    if (now < binanceBannedUntil && cached) {
+      return res.json({ ...cached.data, isCached: true });
+    }
+
     const baseUrl = isTestnet
       ? 'https://testnet.binancefuture.com/fapi/v2'
       : 'https://fapi.binance.com/fapi/v2';
@@ -1674,16 +1740,21 @@ app.post('/api/binance/futures/account', async (req, res) => {
 
     const data = await response.json();
     if (!response.ok) {
+      handleBinanceRateLimitError(response.status, data, 'futures account');
+      if (cached) return res.json({ ...cached.data, isCached: true });
       return res.status(response.status).json({ error: data.msg || 'Binance Futures Account API error' });
     }
 
-    return res.json({
+    const result = {
       success: true,
       canTrade: data.canTrade,
       feeTier: data.feeTier,
       assets: data.assets || [],
       positions: data.positions || [],
-    });
+    };
+
+    serverFuturesAccountCache.set(keyHash, { data: result, expiry: now + 20000 }); // 20s TTL
+    return res.json(result);
   } catch (error: any) {
     return res.status(500).json({ error: sanitizeErrorMessage(error) });
   }

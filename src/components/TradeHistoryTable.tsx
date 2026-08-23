@@ -39,6 +39,7 @@ import {
 interface TradeHistoryTableProps {
   trades: ExecutedTrade[];
   onClearHistory: () => void;
+  onClearLiveHistory?: () => void;
   activePositions?: PaperPosition[];
   onClosePosition?: (symbol: string) => void;
   allTickers?: BinanceTicker24h[];
@@ -51,6 +52,7 @@ interface TradeHistoryTableProps {
 export const TradeHistoryTable: React.FC<TradeHistoryTableProps> = ({
   trades,
   onClearHistory,
+  onClearLiveHistory,
   activePositions = [],
   onClosePosition,
   allTickers = [],
@@ -146,6 +148,18 @@ export const TradeHistoryTable: React.FC<TradeHistoryTableProps> = ({
       alert(`❌ ปิดสัญญาไม่สำเร็จ: ${res.error || 'เกิดข้อผิดพลาด'}`);
     }
     setClosingSymbol(null);
+  };
+
+  // Handle clearing live trade log
+  const handleClearLiveHistory = () => {
+    if (liveTrades.length === 0) return;
+    if (!window.confirm('คุณต้องการลบประวัติคำสั่งซื้อขายจริง (Binance Live Trade Log) ทั้งหมดที่แสดงอยู่หรือไม่?')) {
+      return;
+    }
+    setLiveTrades([]);
+    if (onClearLiveHistory) {
+      onClearLiveHistory();
+    }
   };
 
   // Helper badge renderer
@@ -698,6 +712,15 @@ export const TradeHistoryTable: React.FC<TradeHistoryTableProps> = ({
                     >
                       <Download className="w-3.5 h-3.5" />
                       <span>ส่งออก CSV (Live)</span>
+                    </button>
+                    <button
+                      onClick={handleClearLiveHistory}
+                      disabled={liveTrades.length === 0}
+                      className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 rounded-xl text-xs font-semibold transition flex items-center space-x-1.5 disabled:opacity-40"
+                      title="ลบประวัติคำสั่งซื้อขายจริงทั้งหมด"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                      <span>ลบประวัติคำสั่งซื้อขายจริง</span>
                     </button>
                   </div>
                 </div>

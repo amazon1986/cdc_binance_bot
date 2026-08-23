@@ -98,9 +98,18 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
       }
     : null;
 
-  // Real available USDT in wallet
-  const liveAvailableUsdt = liveWallet?.futuresAssets?.find((a) => a.asset === 'USDT')?.availableBalance ?? liveWallet?.totalFuturesMarginUsd ?? 0;
-  const effectiveBalance = isLiveMode ? (liveAvailableUsdt > 0 ? liveAvailableUsdt : (liveWallet?.totalFuturesMarginUsd || 0)) : paperAccount.usdtBalance;
+  // Real available USDT in wallet (Combined Spot + Futures)
+  const liveSpotUsdt = liveWallet?.spotUsdtFree ?? (liveWallet?.spotBalances?.find((b) => b.asset === 'USDT')?.free ?? 0);
+  const liveFuturesUsdt = liveWallet?.futuresUsdtAvailable ?? (liveWallet?.futuresAssets?.find((a) => a.asset === 'USDT')?.availableBalance ?? 0);
+  const liveCombinedUsdt = liveWallet?.combinedAvailableUsdt ?? (liveSpotUsdt + liveFuturesUsdt);
+  const liveTotalNetWorth = liveWallet?.totalNetWorthUsd ?? ((liveWallet?.totalSpotUsd || 0) + (liveWallet?.totalFuturesEquityUsd || 0));
+
+  // Determine real usable capital so balance is never zeroed out if funds exist in Spot or Futures
+  const liveUsableCapital = liveCombinedUsdt > 0
+    ? liveCombinedUsdt
+    : (liveSpotUsdt > 0 ? liveSpotUsdt : (liveFuturesUsdt > 0 ? liveFuturesUsdt : (liveTotalNetWorth > 0 ? liveTotalNetWorth : 0)));
+
+  const effectiveBalance = isLiveMode ? liveUsableCapital : paperAccount.usdtBalance;
 
   // Computed Manual Trade USDT amount based on selected percentage or fixed amount
   const computedManualUsdt = inputMode === 'FIXED'
@@ -415,14 +424,39 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
             </div>
 
             {/* Wallet Balance Indicator */}
-            <div className="flex items-center justify-between text-xs bg-slate-900/60 px-3 py-2 rounded-lg border border-slate-800/60 font-mono">
-              <span className="text-slate-400 flex items-center gap-1.5">
-                <Wallet className="w-3.5 h-3.5 text-emerald-400" />
-                <span>{isLiveMode ? 'ยอดเงินพร้อมเทรดในกระเป๋าจริง (Binance):' : 'ยอดเงินพอร์ตจำลอง (Paper):'}</span>
-              </span>
-              <span className="font-extrabold text-emerald-400 text-sm">
-                ${effectiveBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT
-              </span>
+            <div className="bg-slate-900/80 px-3 py-2.5 rounded-lg border border-slate-800/80 space-y-1.5 font-mono">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-300 flex items-center gap-1.5 font-sans font-medium">
+                  <Wallet className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>{isLiveMode ? 'ยอดเงินพร้อมเทรดในกระเป๋าจริง (Spot + Futures):' : 'ยอดเงินพอร์ตจำลอง (Paper):'}</span>
+                </span>
+                <div className="flex items-center space-x-1.5">
+                  {isLiveMode && liveWallet?.isCached && (
+                    <span className="text-[10px] bg-amber-500/15 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded font-sans font-semibold">
+                      Auto-Cached 🛡️
+                    </span>
+                  )}
+                  <span className="font-extrabold text-emerald-400 text-sm">
+                    ${effectiveBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDT
+                  </span>
+                </div>
+              </div>
+
+              {isLiveMode && (
+                <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-slate-800/60 font-mono">
+                  <span>
+                    Spot: <strong className="text-slate-200">${liveSpotUsdt.toFixed(2)}</strong>
+                  </span>
+                  <span className="text-slate-600">|</span>
+                  <span>
+                    Futures: <strong className="text-slate-200">${liveFuturesUsdt.toFixed(2)}</strong>
+                  </span>
+                  <span className="text-slate-600">|</span>
+                  <span>
+                    มูลค่าสุทธิรวม: <strong className="text-emerald-400">${liveTotalNetWorth.toFixed(2)}</strong>
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Slider / Fixed Input */}

@@ -244,9 +244,24 @@ export const BinanceWalletView: React.FC<BinanceWalletViewProps> = ({
             </div>
           ) : (
             <>
-              {/* Top Overview Metric Cards */}
+              {/* Cached Data Notification Banner */}
+              {walletData?.isCached && (
+                <div className="bg-amber-500/10 border border-amber-500/30 text-amber-300 px-4 py-2.5 rounded-xl text-xs flex items-center justify-between gap-2 shadow-sm">
+                  <div className="flex items-center space-x-2">
+                    <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>
+                      <strong>ระบบคงยอดเงินล่าสุดไว้ (Persistent Cache):</strong> กำลังแสดงข้อมูลที่บันทึกไว้เพื่อป้องกันการดีดเป็น 0 และลดคำขอช่วง Rate Limit Cooldown
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-amber-400/80 font-mono shrink-0">
+                    {new Date(walletData.lastUpdated).toLocaleTimeString('th-TH')}
+                  </span>
+                </div>
+              )}
+
+              {/* Top Overview Metric Cards (Spot + Futures Combined) */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                {/* 1. Total Net Worth */}
+                {/* 1. Total Net Worth & Combined Available USDT */}
                 <div className="bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-800/90 p-5 rounded-2xl shadow-lg relative overflow-hidden group">
                   <div className="absolute -right-4 -bottom-4 w-24 h-24 bg-emerald-500/5 rounded-full blur-2xl group-hover:bg-emerald-500/10 transition" />
                   <div className="flex items-center justify-between text-slate-400 text-xs mb-2 font-medium">
@@ -261,10 +276,10 @@ export const BinanceWalletView: React.FC<BinanceWalletViewProps> = ({
                       ≈ ฿{maskValue(((walletData?.totalNetWorthUsd || 0) * USD_TO_THB))} <span className="text-[10px] text-slate-500">THB</span>
                     </div>
                   </div>
-                  <div className="mt-3 flex items-center space-x-2 text-[11px]">
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">
-                      <ShieldCheck className="w-3 h-3 mr-1" />
-                      {binanceKeys.isTestnet ? 'Binance Testnet' : 'Binance Live'}
+                  <div className="mt-3 flex items-center justify-between text-[11px] pt-2 border-t border-slate-800/60">
+                    <span className="text-slate-400">USDT พร้อมเทรดรวม:</span>
+                    <span className="font-mono font-bold text-emerald-400">
+                      ${maskValue(walletData?.combinedAvailableUsdt || ((walletData?.spotUsdtFree || 0) + (walletData?.futuresUsdtAvailable || 0)))}
                     </span>
                   </div>
                 </div>
@@ -280,10 +295,10 @@ export const BinanceWalletView: React.FC<BinanceWalletViewProps> = ({
                       ${maskValue(walletData?.totalSpotUsd || 0)} <span className="text-xs text-slate-500 font-sans">USD</span>
                     </div>
                     <div className="text-xs text-slate-400">
-                      ถือครองทั้งหมด <span className="text-slate-200 font-bold font-mono">{walletData?.spotBalances.length || 0}</span> สกุลเหรียญ
+                      USDT ว่าง: <strong className="text-slate-200 font-mono">${maskValue(walletData?.spotUsdtFree || 0)}</strong> | ถือครอง <span className="text-slate-200 font-bold font-mono">{walletData?.spotBalances.length || 0}</span> เหรียญ
                     </div>
                   </div>
-                  <div className="mt-3 text-[11px] text-slate-400 flex items-center justify-between">
+                  <div className="mt-3 text-[11px] text-slate-400 flex items-center justify-between pt-2 border-t border-slate-800/60">
                     <span>สัดส่วนในพอร์ต</span>
                     <span className="font-mono font-bold text-slate-200">
                       {walletData && walletData.totalNetWorthUsd > 0
@@ -296,7 +311,7 @@ export const BinanceWalletView: React.FC<BinanceWalletViewProps> = ({
                 {/* 3. Futures Equity & Margin */}
                 <div className="bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-800/90 p-5 rounded-2xl shadow-lg relative overflow-hidden group">
                   <div className="flex items-center justify-between text-slate-400 text-xs mb-2 font-medium">
-                    <span>กระเป๋า Futures (Margin Balance)</span>
+                    <span>กระเป๋า Futures (Futures Equity)</span>
                     <Zap className="w-4 h-4 text-amber-400" />
                   </div>
                   <div className="space-y-1">
@@ -304,10 +319,10 @@ export const BinanceWalletView: React.FC<BinanceWalletViewProps> = ({
                       ${maskValue(walletData?.totalFuturesEquityUsd || 0)} <span className="text-xs text-slate-500 font-sans">USD</span>
                     </div>
                     <div className="text-xs text-slate-400">
-                      สัญญาที่เปิดอยู่ <span className="text-slate-200 font-bold font-mono">{walletData?.futuresPositions.length || 0}</span> โพซิชัน
+                      USDT พร้อมใช้: <strong className="text-slate-200 font-mono">${maskValue(walletData?.futuresUsdtAvailable || 0)}</strong> | สัญญา <span className="text-slate-200 font-bold font-mono">{walletData?.futuresPositions.length || 0}</span> ไม้
                     </div>
                   </div>
-                  <div className="mt-3 text-[11px] text-slate-400 flex items-center justify-between">
+                  <div className="mt-3 text-[11px] text-slate-400 flex items-center justify-between pt-2 border-t border-slate-800/60">
                     <span>สัดส่วนในพอร์ต</span>
                     <span className="font-mono font-bold text-slate-200">
                       {walletData && walletData.totalNetWorthUsd > 0
@@ -340,10 +355,10 @@ export const BinanceWalletView: React.FC<BinanceWalletViewProps> = ({
                       </span>
                     </div>
                     <div className="text-xs text-slate-400">
-                      Margin ทั้งหมด: <span className="text-slate-200 font-mono">${maskValue(walletData?.totalFuturesMarginUsd || 0)}</span>
+                      Margin รวม: <span className="text-slate-200 font-mono">${maskValue(walletData?.totalFuturesMarginUsd || 0)}</span>
                     </div>
                   </div>
-                  <div className="mt-3 text-[11px] text-slate-500">
+                  <div className="mt-3 text-[11px] text-slate-500 pt-2 border-t border-slate-800/60">
                     อัปเดตล่าสุด: {walletData ? new Date(walletData.lastUpdated).toLocaleTimeString('th-TH') : '-'}
                   </div>
                 </div>
