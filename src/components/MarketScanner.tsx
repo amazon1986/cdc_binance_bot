@@ -28,6 +28,8 @@ import {
 
 interface MarketScannerProps {
   onSelectCoin: (symbol: string) => void;
+  watchlist?: string[];
+  onUpdateWatchlist?: (symbols: string[]) => void;
 }
 
 const PRESET_WATCHLISTS: { [key: string]: string[] } = {
@@ -49,8 +51,27 @@ const PRESET_WATCHLISTS: { [key: string]: string[] } = {
 type FilterCategory = 'ALL' | 'BEST_PICKS' | 'CONFIRMED_PLUS_1' | 'BLUE' | 'GREEN' | 'YELLOW' | 'RED';
 type SortOption = 'SCORE' | 'RECENCY' | 'VOLUME' | 'CHANGE';
 
-export const MarketScanner: React.FC<MarketScannerProps> = ({ onSelectCoin }) => {
-  const [coinList, setCoinList] = useState<string[]>(() => getStoredSymbols());
+export const MarketScanner: React.FC<MarketScannerProps> = ({ onSelectCoin, watchlist, onUpdateWatchlist }) => {
+  const [coinList, setCoinList] = useState<string[]>(() => {
+    if (watchlist && watchlist.length > 0) {
+      return watchlist.map((s) => s.replace('_THB', 'USDT'));
+    }
+    return getStoredSymbols().map((s) => s.replace('_THB', 'USDT'));
+  });
+
+  // Keep synchronized in real-time when Watchlist is updated in BotControlPanel
+  useEffect(() => {
+    if (watchlist && watchlist.length > 0) {
+      const cleaned = watchlist.map((s) => s.replace('_THB', 'USDT'));
+      setCoinList((prev) => {
+        if (JSON.stringify(prev) !== JSON.stringify(cleaned)) {
+          return cleaned;
+        }
+        return prev;
+      });
+    }
+  }, [watchlist]);
+
   const [newSymbolInput, setNewSymbolInput] = useState('');
   const [inputError, setInputError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -167,6 +188,9 @@ export const MarketScanner: React.FC<MarketScannerProps> = ({ onSelectCoin }) =>
     const updated = [...coinList, formatted];
     setCoinList(updated);
     saveStoredSymbols(updated);
+    if (onUpdateWatchlist) {
+      onUpdateWatchlist(updated);
+    }
     setNewSymbolInput('');
     setSuccessMsg(`เพิ่มเหรียญ ${formatted} เรียบร้อยแล้ว`);
 
@@ -194,6 +218,9 @@ export const MarketScanner: React.FC<MarketScannerProps> = ({ onSelectCoin }) =>
 
     setCoinList(updated);
     saveStoredSymbols(updated);
+    if (onUpdateWatchlist) {
+      onUpdateWatchlist(updated);
+    }
     setSuccessMsg(`ลบเหรียญ ${symbolToDelete} เรียบร้อยแล้ว`);
     setTimeout(() => setSuccessMsg(null), 3000);
     setScanResults((prev) => prev.filter((r) => r.symbol !== symbolToDelete));
@@ -204,6 +231,9 @@ export const MarketScanner: React.FC<MarketScannerProps> = ({ onSelectCoin }) =>
     const list = PRESET_WATCHLISTS[presetKey] || POPULAR_PAIRS;
     setCoinList(list);
     saveStoredSymbols(list);
+    if (onUpdateWatchlist) {
+      onUpdateWatchlist(list);
+    }
     setSuccessMsg(`โหลดชุดเหรียญ ${presetKey} (${list.length} เหรียญ) สำเร็จ`);
     setTimeout(() => setSuccessMsg(null), 3000);
     runScanner(list);
@@ -594,22 +624,32 @@ export const MarketScanner: React.FC<MarketScannerProps> = ({ onSelectCoin }) =>
             </div>
 
             <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto scrollbar-thin p-1">
-              {coinList.map((sym) => (
-                <div
-                  key={sym}
-                  className="group flex items-center space-x-2 px-3 py-1.5 bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-xl text-xs font-mono text-white shadow-sm transition"
-                >
-                  <span className="font-bold">{sym}</span>
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteSymbol(sym)}
-                    className="text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 p-0.5 rounded transition"
-                    title={`ลบ ${sym} ออกจากรายการ`}
+              {coinList.map((sym) => {
+                const cleanSym = sym.replace('_THB', 'USDT');
+                return (
+                  <div
+                    key={sym}
+                    className="group flex items-center space-x-2 px-3 py-1.5 bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-xl text-xs font-mono text-white shadow-sm transition"
                   >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              ))}
+                    <span
+                      className="font-bold cursor-pointer hover:text-emerald-400 transition"
+                      onClick={() => onSelectCoin(cleanSym)}
+                      title="คลิกเพื่อดูกราฟเหรียญนี้"
+                    >
+                      {cleanSym.replace('USDT', '')}
+                    </span>
+                    <span className="text-[10px] text-slate-500">/USDT</span>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteSymbol(sym)}
+                      className="text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 p-0.5 rounded transition cursor-pointer"
+                      title={`ลบ ${cleanSym} ออกจากรายการ`}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

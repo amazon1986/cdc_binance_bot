@@ -1,5 +1,5 @@
-import React from 'react';
-import { BotConfig, PaperAccount, BinanceTicker24h, BinanceWalletData } from '../types';
+import React, { useMemo } from 'react';
+import { BotConfig, PaperAccount, BinanceTicker24h, BinanceWalletData, AuthUser } from '../types';
 import { formatCryptoPrice } from '../lib/binanceApi';
 import {
   TrendingUp,
@@ -17,6 +17,9 @@ import {
   Coffee,
   Send,
   Zap,
+  User,
+  LogIn,
+  LogOut,
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -36,9 +39,13 @@ interface HeaderProps {
   ethPrice?: number;
   tickers?: BinanceTicker24h[];
   onSelectSymbol?: (symbol: string) => void;
+  authUser?: AuthUser | null;
+  onOpenLogin?: () => void;
+  onOpenProfile?: () => void;
+  onLogout?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({
+export const Header = React.memo<HeaderProps>(({
   activeTab,
   setActiveTab,
   botConfig,
@@ -55,13 +62,17 @@ export const Header: React.FC<HeaderProps> = ({
   ethPrice,
   tickers = [],
   onSelectSymbol,
+  authUser,
+  onOpenLogin,
+  onOpenProfile,
+  onLogout,
 }) => {
-
-  // Duplicate ticker list for seamless 100% infinite marquee loop
-  const displayTickerItems = tickers.length > 0 ? [...tickers, ...tickers] : [];
+  const displayTickerItems = useMemo(() => {
+    return tickers && tickers.length > 0 ? [...tickers, ...tickers] : [];
+  }, [tickers]);
 
   return (
-    <header className="bg-slate-900 border-b border-slate-800 text-slate-100 sticky top-0 z-40 shadow-lg">
+    <header className="bg-[#0F172B] border-b border-[#1E293B] text-slate-100 sticky top-0 z-40 shadow-xl">
       {/* Top Bar: Title, Running Live Ticker, Paper Account & Settings */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex flex-wrap items-center justify-between gap-4">
         {/* Brand & Title */}
@@ -82,75 +93,29 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Live Running Ticker Tape (ข้อความวิ่งราคาเหรียญทั้งหมดในระบบ) */}
-        <div className="flex-1 max-w-xl mx-2 sm:mx-4 overflow-hidden rounded-xl bg-slate-950/80 border border-slate-800/80 py-1.5 px-3 relative group">
-          {/* Gradient Edge Masks for Smooth Visual Fade */}
-          <div className="absolute left-0 top-0 bottom-0 w-6 bg-gradient-to-r from-slate-950 to-transparent z-10 pointer-events-none" />
-          <div className="absolute right-0 top-0 bottom-0 w-6 bg-gradient-to-l from-slate-950 to-transparent z-10 pointer-events-none" />
-
-          {tickers.length > 0 ? (
-            <div className="animate-marquee flex items-center space-x-6 text-xs whitespace-nowrap">
-              {displayTickerItems.map((t, idx) => {
-                const isPositive = t.priceChangePercent >= 0;
-                const formattedPrice = formatCryptoPrice(t.lastPrice);
-
-                return (
-                  <div
-                    key={`${t.symbol}-${idx}`}
-                    onClick={() => onSelectSymbol && onSelectSymbol(t.symbol)}
-                    className="flex items-center space-x-1.5 cursor-pointer hover:bg-slate-800/90 px-2 py-0.5 rounded transition group/item"
-                    title={`คลิกเพื่อดูชาร์ต ${t.symbol}`}
-                  >
-                    <span className="text-slate-400 font-semibold group-hover/item:text-emerald-400 transition">
-                      {t.symbol.replace('USDT', '')}/USDT:
-                    </span>
-                    <span className="font-mono font-bold text-white">{formattedPrice}</span>
-                    <span
-                      className={`font-mono text-[11px] font-bold ${
-                        isPositive ? 'text-emerald-400' : 'text-rose-400'
-                      }`}
-                    >
-                      {isPositive ? `+${t.priceChangePercent.toFixed(2)}%` : `${t.priceChangePercent.toFixed(2)}%`}
-                    </span>
-                    <span className="text-slate-700 font-bold ml-3">|</span>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="flex items-center justify-center space-x-4 text-xs text-slate-400 py-0.5">
-              <span className="animate-pulse">กำลังดึงราคาเหรียญทั้งหมดในระบบ...</span>
-              {btcPrice && (
-                <span className="font-mono text-emerald-400">BTC: ${btcPrice.toLocaleString()}</span>
-              )}
-              {ethPrice && (
-                <span className="font-mono text-cyan-400">ETH: ${ethPrice.toLocaleString()}</span>
-              )}
-            </div>
-          )}
-        </div>
-
         {/* Right Action Controls: Mode, Balance, Bot Switch, Settings */}
-        <div className="flex items-center space-x-3">
-          {/* Balance Badge (Paper vs Live Spot+Futures) */}
-          {botConfig.mode === 'PAPER' ? (
-            <div className="flex items-center space-x-2 bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-lg text-xs">
-              <Wallet className="w-4 h-4 text-emerald-400" />
-              <div>
-                <span className="text-slate-400 block text-[10px] leading-tight">Paper Capital</span>
-                <span className="font-mono font-bold text-white text-xs">
-                  ${paperAccount.usdtBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </span>
-              </div>
-              <button
-                onClick={onResetPaperAccount}
-                title="Reset Paper Account Balance ($10,000)"
-                className="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-700 transition"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          ) : (
+        <div className="flex items-center space-x-2 sm:space-x-2.5">
+          {authUser && (
+            <>
+              {/* Balance Badge (Paper vs Live Spot+Futures) */}
+              {botConfig.mode === 'PAPER' ? (
+                <div className="flex items-center space-x-2 bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-lg text-xs">
+                  <Wallet className="w-4 h-4 text-emerald-400" />
+                  <div>
+                    <span className="text-slate-400 block text-[10px] leading-tight">Paper Capital</span>
+                    <span className="font-mono font-bold text-white text-xs">
+                      ${paperAccount.usdtBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <button
+                    onClick={onResetPaperAccount}
+                    title="Reset Paper Account Balance ($10,000)"
+                    className="text-slate-400 hover:text-white p-1 rounded hover:bg-slate-700 transition"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ) : (
             (() => {
               const spotUsdt = liveWallet?.spotUsdtFree ?? (liveWallet?.spotBalances?.find((b) => b.asset === 'USDT')?.free ?? 0);
               const futUsdt = liveWallet?.futuresUsdtAvailable ?? (liveWallet?.futuresAssets?.find((a) => a.asset === 'USDT')?.availableBalance ?? 0);
@@ -234,33 +199,71 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
 
-          {/* Settings Modal Button */}
-          <button
-            onClick={onOpenSettings}
-            className="p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white rounded-lg transition"
-            title="ตั้งค่า Binance API Key / Mode"
-          >
-            <Settings className="w-4 h-4" />
-          </button>
+              {/* Settings Modal Button */}
+              <button
+                onClick={onOpenSettings}
+                className="p-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white rounded-lg transition"
+                title="ตั้งค่า Binance API Key / Mode"
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+            </>
+          )}
+
+          {/* User Profile / Username & Logout (ตามแบบตัวอย่าง) */}
+          {authUser ? (
+            <>
+              {/* Profile Button */}
+              <button
+                onClick={onOpenProfile}
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border border-slate-700/80 bg-slate-800/80 hover:bg-slate-700/80 text-emerald-400 text-xs font-semibold transition"
+                title={`ผู้ใช้งาน: ${authUser.username} (คลิกเพื่อดูโปรไฟล์)`}
+              >
+                <User className="w-3.5 h-3.5 text-emerald-400" />
+                <span>{authUser.username}</span>
+              </button>
+
+              {/* Logout Button */}
+              <button
+                onClick={onLogout}
+                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 hover:text-white text-xs font-semibold transition"
+                title="ออกจากระบบ"
+              >
+                <LogOut className="w-3.5 h-3.5 text-rose-400" />
+                <span>ออกจากระบบ</span>
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={onOpenLogin}
+              className="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow transition"
+              title="เข้าสู่ระบบ"
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              <span>เข้าสู่ระบบ</span>
+            </button>
+          )}
 
         </div>
       </div>
 
-      {/* Navigation Tabs Bar */}
-      <div className="bg-slate-950/80 border-t border-slate-800/80 px-3 sm:px-6 lg:px-8">
-        <div className="max-w-7xl mx-auto flex space-x-1 sm:space-x-2 overflow-x-auto py-2 scrollbar-none touch-pan-x overscroll-x-contain">
-          {/* 1. Chart & Bot Control */}
-          <button
-            onClick={() => setActiveTab('chart')}
-            className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-xs font-medium transition whitespace-nowrap ${
-              activeTab === 'chart'
-                ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-semibold'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-            }`}
-          >
-            <BarChart3 className="w-4 h-4" />
-            <span>ชาร์ต & ควบคุมบอท</span>
-          </button>
+      {/* Navigation Tabs Bar (Exact sampled color: #03081A) */}
+      <div className="bg-[#03081A] border-t border-[#1E293B]">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          {authUser ? (
+            <div className="flex space-x-1 sm:space-x-2 overflow-x-auto py-2 scrollbar-none touch-pan-x overscroll-x-contain">
+              {/* 1. Chart & Bot Control */}
+              <button
+                onClick={() => setActiveTab('chart')}
+                className={`flex items-center space-x-2 px-3.5 py-2 rounded-lg text-xs font-medium transition whitespace-nowrap ${
+                  activeTab === 'chart'
+                    ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-semibold'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                }`}
+              >
+                <BarChart3 className="w-4 h-4" />
+                <span>ชาร์ต & ควบคุมบอท</span>
+              </button>
 
           {/* 2. Wallet (Binance & Paper) */}
           <button
@@ -348,7 +351,77 @@ export const Header: React.FC<HeaderProps> = ({
             <span>เลี้ยงกาแฟ ☕</span>
           </button>
         </div>
+      ) : (
+        <div className="py-2.5 flex items-center justify-between text-xs text-slate-400">
+          <div className="flex items-center space-x-2">
+            <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+            <span>🔒 กรุณาเข้าสู่ระบบเพื่อเข้าถึงแดชบอร์ด ควบคุมบอท และดูกระเป๋าเหรียญ</span>
+          </div>
+          <button
+            onClick={onOpenLogin}
+            className="text-emerald-400 hover:text-emerald-300 font-semibold underline underline-offset-4 cursor-pointer"
+          >
+            เข้าสู่ระบบทันที &rarr;
+          </button>
+        </div>
+      )}
+        </div>
+      </div>
+
+      {/* 3. Dedicated Running Price Ticker Tape Strip (Exact sampled color: #0F172B) */}
+      <div className="bg-[#0F172B] border-t border-b border-[#1E293B] py-1.5">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="relative overflow-hidden group">
+            {/* Subtle gradient edge masks matching #0F172B background exactly */}
+            <div className="absolute left-0 top-0 bottom-0 w-8 bg-gradient-to-r from-[#0F172B] to-transparent z-10 pointer-events-none" />
+            <div className="absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-[#0F172B] to-transparent z-10 pointer-events-none" />
+
+            {displayTickerItems.length > 0 ? (
+              <div className="animate-marquee flex items-center text-xs whitespace-nowrap select-none">
+                {displayTickerItems.map((t, idx) => {
+                  const isPositive = t.priceChangePercent >= 0;
+                  const formattedPrice = formatCryptoPrice(t.lastPrice);
+                  const cleanSymbol = t.symbol.replace('USDT', '');
+
+                  return (
+                    <div
+                      key={`${t.symbol}-${idx}`}
+                      onClick={() => onSelectSymbol && onSelectSymbol(t.symbol)}
+                      className="flex items-center cursor-pointer hover:bg-slate-800/80 px-2 py-0.5 rounded transition group/item shrink-0"
+                      title={`คลิกเพื่อดูชาร์ต ${t.symbol}`}
+                    >
+                      <span className="text-slate-400 font-semibold group-hover/item:text-emerald-400 transition">
+                        {cleanSymbol}/USDT:
+                      </span>
+                      <span className="font-mono font-bold text-white ml-1.5">
+                        {formattedPrice}
+                      </span>
+                      <span
+                        className={`font-mono font-bold ml-1.5 ${
+                          isPositive ? 'text-emerald-400' : 'text-rose-400'
+                        }`}
+                      >
+                        {isPositive ? `+${t.priceChangePercent.toFixed(2)}%` : `${t.priceChangePercent.toFixed(2)}%`}
+                      </span>
+                      <span className="text-slate-700/80 font-bold ml-5 mr-3 select-none">|</span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="flex items-center justify-center space-x-4 text-xs text-slate-400 py-0.5">
+                <span className="animate-pulse">กำลังดึงราคาเหรียญทั้งหมดในระบบ...</span>
+                {btcPrice && (
+                  <span className="font-mono text-emerald-400">BTC: ${btcPrice.toLocaleString()}</span>
+                )}
+                {ethPrice && (
+                  <span className="font-mono text-cyan-400">ETH: ${ethPrice.toLocaleString()}</span>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </header>
   );
-};
+});

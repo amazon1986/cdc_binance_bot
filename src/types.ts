@@ -65,7 +65,8 @@ export interface BotConfig {
   sellOnSignal: ('YELLOW' | 'RED')[];
   mode: 'PAPER' | 'BINANCE_LIVE';
   marketType?: 'SPOT' | 'FUTURES';
-  scanMode?: 'SINGLE' | 'MULTI_SCAN';
+  scanMode?: 'SINGLE' | 'WATCHLIST' | 'MULTI_SCAN';
+  watchlist?: string[];
   directionMode?: 'LONG_ONLY' | 'SHORT_ONLY' | 'BOTH';
   isActive: boolean;
   lastSignal?: CDCSignalType;
@@ -301,4 +302,9 @@ export interface BinanceLiveHistoryResponse {
   error?: string;
 }
 
-
+export interface AuthUser {
+  username: string;
+  name: string;
+  role: 'admin' | 'trader';
+  loginTime: number;
+}

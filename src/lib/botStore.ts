@@ -47,6 +47,7 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
   sellOnSignal: ['RED'], // 🎯 ขายออก/Short เฉพาะสัญญาณแดงแรกคอนเฟิร์ม (Bearish Cash Out)
   mode: 'BINANCE_LIVE', // ⚡ Default เป็นกระเป๋าจริง Binance Live
   scanMode: 'MULTI_SCAN', // 🎯 สแกนเปิดออเดอร์ทุกเหรียญอัตโนมัติ
+  watchlist: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'DOGEUSDT', 'ADAUSDT', 'XRPUSDT', 'SUIUSDT'],
   directionMode: 'BOTH', // 🎯 เล่นทั้งฝั่ง Long & Short
   isActive: false,
 };
@@ -85,6 +86,7 @@ export function getStoredBotConfig(): BotConfig {
       useTrailingStop: parsed.useTrailingStop ?? false,
       useWhipsawProtection: parsed.useWhipsawProtection ?? true,
       scanMode: parsed.scanMode || 'MULTI_SCAN',
+      watchlist: Array.isArray(parsed.watchlist) && parsed.watchlist.length > 0 ? parsed.watchlist : DEFAULT_BOT_CONFIG.watchlist,
       directionMode: parsed.directionMode || 'BOTH',
       buyOnSignal: parsed.buyOnSignal && parsed.buyOnSignal.length > 0 ? parsed.buyOnSignal : ['BLUE', 'GREEN'],
       sellOnSignal: parsed.sellOnSignal && parsed.sellOnSignal.length > 0 ? parsed.sellOnSignal : ['RED'],
@@ -180,21 +182,42 @@ export function addBotLog(logMessage: string): string[] {
 
 export function getStoredSymbols(): string[] {
   try {
+    // 1. Check if botConfig has a watchlist first to keep them synchronized
+    const configRaw = localStorage.getItem(STORAGE_KEYS.BOT_CONFIG);
+    if (configRaw) {
+      const parsedConfig = JSON.parse(configRaw);
+      if (Array.isArray(parsedConfig.watchlist) && parsedConfig.watchlist.length > 0) {
+        return parsedConfig.watchlist.map((s: string) => s.replace('_THB', 'USDT'));
+      }
+    }
+
+    // 2. Check custom symbols key
     const raw = localStorage.getItem(STORAGE_KEYS.CUSTOM_SYMBOLS);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+        return parsed.map((s: string) => s.replace('_THB', 'USDT'));
       }
     }
-    return POPULAR_PAIRS;
+    return DEFAULT_BOT_CONFIG.watchlist || POPULAR_PAIRS;
   } catch {
-    return POPULAR_PAIRS;
+    return DEFAULT_BOT_CONFIG.watchlist || POPULAR_PAIRS;
   }
 }
 
 export function saveStoredSymbols(symbols: string[]): void {
-  localStorage.setItem(STORAGE_KEYS.CUSTOM_SYMBOLS, JSON.stringify(symbols));
+  const cleanList = symbols.map((s) => s.replace('_THB', 'USDT'));
+  localStorage.setItem(STORAGE_KEYS.CUSTOM_SYMBOLS, JSON.stringify(cleanList));
+
+  // Sync to botConfig in localStorage so BotControlPanel and MarketScanner stay identical
+  try {
+    const configRaw = localStorage.getItem(STORAGE_KEYS.BOT_CONFIG);
+    if (configRaw) {
+      const parsedConfig = JSON.parse(configRaw);
+      parsedConfig.watchlist = cleanList;
+      localStorage.setItem(STORAGE_KEYS.BOT_CONFIG, JSON.stringify(parsedConfig));
+    }
+  } catch {}
 }
 
 export function getStoredTelegramConfig(): TelegramConfig {

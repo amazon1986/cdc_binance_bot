@@ -1,3 +1,6 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
@@ -91,6 +94,7 @@ const DEFAULT_SERVER_STATE: ServerState = {
     sellOnSignal: ['RED'],
     mode: 'BINANCE_LIVE',
     scanMode: 'MULTI_SCAN',
+    watchlist: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'DOGEUSDT', 'ADAUSDT', 'XRPUSDT', 'SUIUSDT'],
     directionMode: 'BOTH',
     isActive: false,
   },
@@ -144,6 +148,33 @@ function loadServerState() {
         telegramConfig: { ...DEFAULT_SERVER_STATE.telegramConfig, ...(parsed.telegramConfig || {}) },
       };
       console.log('✅ Loaded persistent bot state from disk.');
+    }
+
+    // 🔑 Auto-load Binance API Credentials from .env if present
+    const envApiKey = (process.env.BINANCE_API_KEY || '').trim();
+    const envApiSecret = (process.env.BINANCE_API_SECRET || '').trim();
+    if (envApiKey && envApiSecret) {
+      serverState.liveApiKeys = {
+        apiKey: envApiKey,
+        apiSecret: envApiSecret,
+        isTestnet: process.env.BINANCE_IS_TESTNET === 'true',
+        marketType: (process.env.BINANCE_MARKET_TYPE as any) || 'FUTURES',
+        marginType: (process.env.BINANCE_MARGIN_TYPE as any) || 'ISOLATED',
+      };
+      console.log(`🔑 [ENV] Loaded Binance API credentials from .env (${serverState.liveApiKeys.marketType} | ${serverState.liveApiKeys.isTestnet ? 'Testnet' : 'Live'})`);
+    }
+
+    // 📱 Auto-load Telegram Credentials from .env if present
+    const envTelegramToken = (process.env.TELEGRAM_BOT_TOKEN || '').trim();
+    const envTelegramChatId = (process.env.TELEGRAM_CHAT_ID || '').trim();
+    if (envTelegramToken && envTelegramChatId) {
+      serverState.telegramConfig = {
+        ...serverState.telegramConfig,
+        botToken: envTelegramToken,
+        chatId: envTelegramChatId,
+        enabled: process.env.TELEGRAM_ENABLED !== 'false',
+      };
+      console.log(`📱 [ENV] Loaded Telegram Bot credentials from .env (ChatId: ${envTelegramChatId})`);
     }
   } catch (err) {
     console.error('Error reading bot_state.json:', err);
@@ -611,8 +642,17 @@ async function runServerBotCycle() {
   isCycleRunning = true;
   try {
     const dirMode = config.directionMode ?? 'LONG_ONLY';
-    const isMultiScan = config.scanMode === 'MULTI_SCAN';
-    const symbolsToEvaluate = isMultiScan ? POPULAR_PAIRS.slice(0, 12) : [config.symbol];
+    let symbolsToEvaluate: string[] = [config.symbol];
+    if (config.scanMode === 'WATCHLIST') {
+      symbolsToEvaluate = config.watchlist && config.watchlist.length > 0
+        ? config.watchlist
+        : ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'DOGEUSDT', 'ADAUSDT', 'XRPUSDT', 'SUIUSDT'];
+    } else if (config.scanMode === 'MULTI_SCAN') {
+      symbolsToEvaluate = POPULAR_PAIRS.slice(0, 15);
+    } else {
+      symbolsToEvaluate = [config.symbol];
+    }
+    const isMultiScan = config.scanMode === 'MULTI_SCAN' || config.scanMode === 'WATCHLIST';
 
     for (const sym of symbolsToEvaluate) {
       if (!serverState.botConfig.isActive) break;
@@ -966,6 +1006,53 @@ if (RENDER_APP_URL) {
   }, 10 * 60 * 1000);
 }
 
+// ==================== AUTHENTICATION REST ENDPOINTS ====================
+
+// Verify credentials against .env (or default)
+app.post('/api/auth/login', (req, res) => {
+  try {
+    const { username, password } = req.body || {};
+    const expectedUser = (process.env.AUTH_USERNAME || 'amazon1986').trim();
+    const expectedPass = (process.env.AUTH_PASSWORD || 'amazon1986').trim();
+
+    const inputUser = String(username || '').trim();
+    const inputPass = String(password || '').trim();
+
+    if (!inputUser || !inputPass) {
+      return res.status(400).json({ success: false, error: 'กรุณากรอก Username และ Password ให้ครบถ้วน' });
+    }
+
+    if (inputUser !== expectedUser || inputPass !== expectedPass) {
+      return res.status(401).json({
+        success: false,
+        error: 'ชื่อผู้ใช้งาน (Username) หรือรหัสผ่าน (Password) ไม่ถูกต้อง',
+      });
+    }
+
+    const authUser: AuthUser = {
+      username: inputUser,
+      name: inputUser === 'amazon1986' ? 'Amazon Quantitative Trader' : inputUser,
+      role: 'admin',
+      loginTime: Date.now(),
+    };
+
+    addServerLog(`👤 [AUTH] ผู้ใช้ ${inputUser} เข้าสู่ระบบสำเร็จ`);
+    return res.json({ success: true, user: authUser });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: sanitizeErrorMessage(err) });
+  }
+});
+
+// Get public auth info (configured username for auto-fill convenience)
+app.get('/api/auth/info', (req, res) => {
+  const configuredUser = (process.env.AUTH_USERNAME || 'amazon1986').trim();
+  const hasCustomPassword = Boolean(process.env.AUTH_PASSWORD && process.env.AUTH_PASSWORD !== 'your_password_here');
+  return res.json({
+    username: configuredUser,
+    hasCustomPassword,
+  });
+});
+
 // ==================== CENTRAL BOT REST ENDPOINTS ====================
 
 // 1. Get central server state
@@ -1306,11 +1393,17 @@ app.post('/api/binance/keys', (req, res) => {
 });
 
 app.get('/api/binance/keys', (req, res) => {
-  if (!serverState.liveApiKeys) {
+  if (!serverState.liveApiKeys || !serverState.liveApiKeys.apiKey) {
     return res.json({ configured: false });
   }
+  const keyStr = serverState.liveApiKeys.apiKey;
+  const maskedKey = keyStr.length > 10
+    ? `${keyStr.substring(0, 6)}...${keyStr.slice(-4)}`
+    : '••••••••';
+
   return res.json({
     configured: true,
+    maskedApiKey: maskedKey,
     isTestnet: serverState.liveApiKeys.isTestnet,
     marketType: serverState.liveApiKeys.marketType,
     marginType: serverState.liveApiKeys.marginType,

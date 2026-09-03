@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { BotConfig, PaperAccount, PaperPosition, ExecutedTrade, Timeframe, BinanceWalletData, BinanceApiKeys } from '../types';
-import { formatCryptoPrice, formatCryptoAmount } from '../lib/binanceApi';
+import { formatCryptoPrice, formatCryptoAmount, POPULAR_PAIRS } from '../lib/binanceApi';
 import {
   Play,
   Pause,
@@ -19,7 +19,26 @@ import {
   RefreshCw,
   Wallet,
   ExternalLink,
+  Star,
+  Plus,
+  X,
+  Search,
 } from 'lucide-react';
+
+const ALL_BINANCE_USDT_PAIRS = [
+  'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT',
+  'SUIUSDT', 'LINKUSDT', 'NEARUSDT', 'DOTUSDT', 'PEPEUSDT', 'SHIBUSDT', 'APTUSDT', 'ARBUSDT',
+  'OPUSDT', 'LTCUSDT', 'UNIUSDT', 'RENDERUSDT', 'FETUSDT', 'INJUSDT', 'TIAUSDT', 'BONKUSDT',
+  'FLOKIUSDT', 'TAOUSDT', 'ONDOUSDT', 'WIFUSDT', 'KASUSDT', 'JUPUSDT', 'WLDUSDT', 'AAVEUSDT',
+  'CRVUSDT', 'POLUSDT', 'SEIUSDT', 'DYDXUSDT', 'IMXUSDT', 'STXUSDT', 'BEAMUSDT', 'BLURUSDT',
+  'SAHARAUSDT', 'PENGUUSDT', 'BOMEUSDT', 'MEWUSDT', 'POPCATUSDT', 'FARTCOINUSDT', 'TRUMPUSDT',
+  'PYTHUSDT', 'JTOUSDT', 'STRKUSDT', 'ZKUSDT', 'ENAUSDT', 'NOTUSDT', 'TONUSDT', 'ATOMUSDT',
+  'FILUSDT', 'FTMUSDT', 'HBARUSDT', 'ALGOUSDT', 'VETUSDT', 'SANDUSDT', 'MANAUSDT', 'GALAUSDT',
+  'AXSUSDT', 'THETAUSDT', 'EGLDUSDT', 'KAVAUSDT', 'FLOWUSDT', 'CHZUSDT', 'ENJUSDT', 'ROSEUSDT',
+  '1000SATSUSDT', 'NEIROUSDT', 'PNUTUSDT', 'MOVEUSDT', 'ACTUSDT', 'MEUSDT', 'KAIAUSDT', 'VIRTUALUSDT',
+  'AIUSDT', 'NFPUSDT', 'XAIUSDT', 'PORTALUSDT', 'AEVOUSDT', 'ETHFIUSDT', 'OMNIUSDT', 'IOUSDT',
+  'PLUMEUSDT', 'MAJORUSDT', 'THEUSDT', 'CHILLGUYUSDT'
+];
 
 interface BotControlPanelProps {
   botConfig: BotConfig;
@@ -37,6 +56,7 @@ interface BotControlPanelProps {
   onRefreshLiveWallet?: () => void;
   binanceKeys?: BinanceApiKeys;
   onOpenSettings?: () => void;
+  onSelectSymbol?: (symbol: string) => void;
 }
 
 export const BotControlPanel: React.FC<BotControlPanelProps> = ({
@@ -55,12 +75,17 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
   onRefreshLiveWallet,
   binanceKeys,
   onOpenSettings,
+  onSelectSymbol,
 }) => {
   const [configForm, setConfigForm] = useState<BotConfig>({ ...botConfig });
   const [isEditing, setIsEditing] = useState(false);
   const [manualPercent, setManualPercent] = useState<number>(botConfig.balancePercent || 25);
   const [inputMode, setInputMode] = useState<'PERCENT' | 'FIXED'>('PERCENT');
-  const [fixedUsdt, setFixedUsdt] = useState<number>(botConfig.tradeAmountUsdt || 20);
+  const [fixedUsdt, setFixedUsdt] = useState<number | string>(botConfig.tradeAmountUsdt || 20);
+  const [selectedAddSymbol, setSelectedAddSymbol] = useState<string>('');
+  const [watchlistSearchInput, setWatchlistSearchInput] = useState<string>('');
+  const [isSearchDropdownOpen, setIsSearchDropdownOpen] = useState<boolean>(false);
+  const [watchlistToast, setWatchlistToast] = useState<{ msg: string; type: 'success' | 'warning' } | null>(null);
 
   React.useEffect(() => {
     if (!isEditing) {
@@ -112,11 +137,12 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
   const effectiveBalance = isLiveMode ? liveUsableCapital : paperAccount.usdtBalance;
 
   // Computed Manual Trade USDT amount based on selected percentage or fixed amount
+  const numericFixedUsdt = Math.max(5, Number(fixedUsdt) || 5);
   const computedManualUsdt = inputMode === 'FIXED'
-    ? Math.max(5, fixedUsdt)
+    ? numericFixedUsdt
     : effectiveBalance > 0
       ? Math.max(5, (effectiveBalance * manualPercent) / 100)
-      : Math.max(5, fixedUsdt);
+      : numericFixedUsdt;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -128,6 +154,8 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
       tradeAmountUsdt: Number(configForm.tradeAmountUsdt) || 100,
       stopLossPercent: Number(configForm.stopLossPercent) || 0,
       takeProfitPercent: Number(configForm.takeProfitPercent) || 0,
+      maxOpenPositions: Number(configForm.maxOpenPositions) || 5,
+      trailingStopPercent: Number(configForm.trailingStopPercent) || 7,
       leverage: Math.min(Math.max(1, Number(configForm.leverage) || 1), 10),
       longLeverage: Math.min(Math.max(1, Number(configForm.longLeverage) || 2), 10),
       shortLeverage: Math.min(Math.max(1, Number(configForm.shortLeverage) || 3), 10),
@@ -157,69 +185,422 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
               }`}
             >
               {botConfig.isActive
-                ? `🟢 Bot Auto (${botConfig.scanMode === 'MULTI_SCAN' ? 'สแกนทุกเหรียญ' : botConfig.symbol})`
+                ? `🟢 Bot Auto (${botConfig.scanMode === 'WATCHLIST' ? 'สแกน Watchlist' : botConfig.scanMode === 'MULTI_SCAN' ? 'สแกนทั้งตลาด' : botConfig.symbol})`
                 : '🔴 Bot ปิดการทำงาน'}
             </span>
           </div>
 
-          {/* Trading Scope Mode Selector */}
-          <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3.5 space-y-2">
-            <label className="text-xs font-bold text-slate-200 block">
-              โหมดการสแกนของบอท (Trading Scope Mode)
-            </label>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+          {/* Trading Scope Mode Selector (ตรงตามภาพตัวอย่าง) */}
+          <div className="bg-slate-950 border border-slate-800/80 rounded-2xl p-4 sm:p-5 space-y-3.5 shadow-xl">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <label className="text-sm font-bold text-slate-100 flex items-center space-x-2">
+                <span>โหมดการสแกนของบอท (Trading Scope Mode)</span>
+              </label>
+
+              {/* Quota Badge (ตรงตามภาพตัวอย่าง: 🎯 โควต้าไม้: 0 / 5 ไม้ (ว่าง 5 ไม้)) */}
+              {(() => {
+                const maxPositions = botConfig.maxOpenPositions || 5;
+                const currentPositionsCount = isLiveMode
+                  ? (liveWallet?.futuresPositions?.filter((p) => Math.abs(p.positionAmt) > 0)?.length || 0)
+                  : (paperAccount.activePositions?.length || 0);
+                const freeSlots = Math.max(0, maxPositions - currentPositionsCount);
+
+                return (
+                  <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-slate-900/90 border border-slate-700/80 text-xs">
+                    <span>🎯</span>
+                    <span className="font-semibold text-slate-300">
+                      โควต้าไม้: <span className="font-mono text-white font-bold">{currentPositionsCount}</span> / <span className="font-mono text-white font-bold">{maxPositions}</span> ไม้
+                    </span>
+                    <span className="text-slate-400 font-normal">
+                      (ว่าง <span className="font-mono text-emerald-400 font-bold">{freeSlots}</span> ไม้)
+                    </span>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* 3 Scope Cards in Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+              {/* 1. เล่นเฉพาะเหรียญปัจจุบัน */}
               <button
                 type="button"
                 onClick={() => {
-                  const updated = { ...botConfig, scanMode: 'SINGLE' as const };
+                  const updated: BotConfig = { ...botConfig, scanMode: 'SINGLE' };
                   onSaveConfig(updated);
                   setConfigForm(updated);
                 }}
-                className={`p-3 rounded-xl border text-left transition flex flex-col justify-between space-y-1 ${
+                className={`p-4 rounded-xl border text-left transition flex flex-col justify-between space-y-2 cursor-pointer ${
                   (botConfig.scanMode ?? 'SINGLE') === 'SINGLE'
-                    ? 'bg-emerald-500/10 border-emerald-500/50 text-white font-bold'
-                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                    ? 'bg-slate-900 border-emerald-500/60 text-white font-bold ring-1 ring-emerald-500/30 shadow-lg'
+                    : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:border-slate-700 hover:bg-slate-900'
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span>🎯 เล่นเฉพาะเหรียญปัจจุบัน</span>
+                  <span className="font-bold text-sm text-slate-100 flex items-center space-x-1.5">
+                    <span>🎯</span>
+                    <span>เล่นเฉพาะเหรียญปัจจุบัน</span>
+                  </span>
                   {(botConfig.scanMode ?? 'SINGLE') === 'SINGLE' && (
-                    <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded-full font-extrabold">
+                    <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 px-2 py-0.5 rounded-full font-bold">
                       ใช้งานอยู่
                     </span>
                   )}
                 </div>
-                <p className="text-[11px] text-slate-400 font-normal leading-normal">
+                <p className="text-[11px] text-slate-400 font-normal leading-relaxed">
                   เฝ้าระวังและส่งคำสั่งซื้อเฉพาะเหรียญ {botConfig.symbol} ที่เลือกอยู่นี้เท่านั้น
                 </p>
               </button>
 
+              {/* 2. เล่นเฉพาะใน Watchlist (สี Amber ตามแบบตัวอย่าง) */}
               <button
                 type="button"
                 onClick={() => {
-                  const updated = { ...botConfig, scanMode: 'MULTI_SCAN' as const };
+                  const updated: BotConfig = { ...botConfig, scanMode: 'WATCHLIST' };
                   onSaveConfig(updated);
                   setConfigForm(updated);
                 }}
-                className={`p-3 rounded-xl border text-left transition flex flex-col justify-between space-y-1 ${
-                  botConfig.scanMode === 'MULTI_SCAN'
-                    ? 'bg-blue-500/10 border-blue-500/50 text-white font-bold'
-                    : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                className={`p-4 rounded-xl border text-left transition flex flex-col justify-between space-y-2 cursor-pointer ${
+                  botConfig.scanMode === 'WATCHLIST'
+                    ? 'bg-[#181308] border-amber-500/70 text-white font-bold ring-1 ring-amber-500/40 shadow-lg'
+                    : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:border-slate-700 hover:bg-slate-900'
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span>🌐 สแกนเปิดออเดอร์ทุกเหรียญอัตโนมัติ</span>
-                  {botConfig.scanMode === 'MULTI_SCAN' && (
-                    <span className="text-[10px] bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded-full font-extrabold">
+                  <span className="font-bold text-sm text-amber-300 flex items-center space-x-1.5">
+                    <span>⭐</span>
+                    <span>เล่นเฉพาะใน Watchlist</span>
+                  </span>
+                  {botConfig.scanMode === 'WATCHLIST' && (
+                    <span className="text-[10px] bg-amber-500/25 text-amber-300 border border-amber-500/50 px-2 py-0.5 rounded-full font-bold">
                       ใช้งานอยู่
                     </span>
                   )}
                 </div>
-                <p className="text-[11px] text-slate-400 font-normal leading-normal">
-                  สแกนเหรียญทั้งหมดใน Binance และส่งคำสั่งเข้าซื้อทุกเหรียญที่เกิดสัญญาณ CDC
+                <p className="text-[11px] text-slate-400 font-normal leading-relaxed">
+                  สแกนและคัดเลือกเฉพาะเหรียญใน Watchlist ที่ตั้งไว้ ตามโควต้าไม้
+                </p>
+              </button>
+
+              {/* 3. สแกนทั้งตลาด (Top Picks) */}
+              <button
+                type="button"
+                onClick={() => {
+                  const updated: BotConfig = { ...botConfig, scanMode: 'MULTI_SCAN' };
+                  onSaveConfig(updated);
+                  setConfigForm(updated);
+                }}
+                className={`p-4 rounded-xl border text-left transition flex flex-col justify-between space-y-2 cursor-pointer ${
+                  botConfig.scanMode === 'MULTI_SCAN'
+                    ? 'bg-blue-500/10 border-blue-500/60 text-white font-bold ring-1 ring-blue-500/30 shadow-lg'
+                    : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:border-slate-700 hover:bg-slate-900'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-sm text-slate-100 flex items-center space-x-1.5">
+                    <span>🌐</span>
+                    <span>สแกนทั้งตลาด (Top Picks)</span>
+                  </span>
+                  {botConfig.scanMode === 'MULTI_SCAN' && (
+                    <span className="text-[10px] bg-blue-500/20 text-blue-400 border border-blue-500/40 px-2 py-0.5 rounded-full font-bold">
+                      ใช้งานอยู่
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-400 font-normal leading-relaxed">
+                  สแกนทุกเหรียญใน Binance และคัดเลือกเหรียญคะแนนสูงสุดเข้าซื้อตามจำนวนไม้
                 </p>
               </button>
             </div>
+
+            {/* Watchlist Manager Sub-Panel (เมื่ออยู่ในโหมด Watchlist) */}
+            {botConfig.scanMode === 'WATCHLIST' && (() => {
+              const currentWatchlist = Array.isArray(botConfig.watchlist) && botConfig.watchlist.length > 0
+                ? botConfig.watchlist
+                : ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'DOGEUSDT', 'ADAUSDT', 'XRPUSDT', 'SUIUSDT'];
+
+              const handleApplyPreset = (list: string[]) => {
+                const updated: BotConfig = { ...botConfig, scanMode: 'WATCHLIST', watchlist: list };
+                onSaveConfig(updated);
+                setConfigForm(updated);
+              };
+
+              const handleRemoveSymbol = (sym: string) => {
+                const nextList = currentWatchlist.filter((s) => s !== sym);
+                const updated: BotConfig = { ...botConfig, scanMode: 'WATCHLIST', watchlist: nextList };
+                onSaveConfig(updated);
+                setConfigForm(updated);
+              };
+
+              const handleAddSymbol = (sym: string) => {
+                if (!currentWatchlist.includes(sym)) {
+                  const nextList = [...currentWatchlist, sym];
+                  const updated: BotConfig = { ...botConfig, scanMode: 'WATCHLIST', watchlist: nextList };
+                  onSaveConfig(updated);
+                  setConfigForm(updated);
+                }
+              };
+
+              const triggerToast = (msg: string, type: 'success' | 'warning' = 'success') => {
+                setWatchlistToast({ msg, type });
+                setTimeout(() => setWatchlistToast(null), 3500);
+              };
+
+              const handleAddCustomSymbol = (rawSymbol: string) => {
+                const clean = rawSymbol.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+                if (!clean) return;
+                const formatted = clean.endsWith('USDT') ? clean : `${clean}USDT`;
+
+                if (currentWatchlist.includes(formatted)) {
+                  triggerToast(`เหรียญ ${formatted} มีอยู่ใน Watchlist แล้ว`, 'warning');
+                  setWatchlistSearchInput('');
+                  setIsSearchDropdownOpen(false);
+                  return;
+                }
+
+                const nextList = [...currentWatchlist, formatted];
+                const updated: BotConfig = { ...botConfig, scanMode: 'WATCHLIST', watchlist: nextList };
+                onSaveConfig(updated);
+                setConfigForm(updated);
+                triggerToast(`เพิ่ม ${formatted.replace('USDT', '')} เข้า Watchlist สำเร็จ ⭐`, 'success');
+                setWatchlistSearchInput('');
+                setIsSearchDropdownOpen(false);
+              };
+
+              const cleanQuery = watchlistSearchInput.trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+              const suggestions = cleanQuery
+                ? ALL_BINANCE_USDT_PAIRS.filter((sym) => {
+                    const base = sym.replace('USDT', '');
+                    return (
+                      (sym.includes(cleanQuery) || base.includes(cleanQuery)) &&
+                      !currentWatchlist.includes(sym)
+                    );
+                  }).slice(0, 8)
+                : [];
+
+              const formattedQuery = cleanQuery.endsWith('USDT') ? cleanQuery : `${cleanQuery}USDT`;
+              const isQueryAlreadyInList = cleanQuery ? currentWatchlist.includes(formattedQuery) : false;
+
+              return (
+                <div className="pt-3 border-t border-slate-800/80 bg-slate-900/60 rounded-xl p-3.5 space-y-3 animate-fadeIn">
+                  {/* Toast Alert Feedback */}
+                  {watchlistToast && (
+                    <div
+                      className={`text-xs px-3 py-1.5 rounded-lg font-medium flex items-center justify-between transition animate-fadeIn ${
+                        watchlistToast.type === 'success'
+                          ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                          : 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+                      }`}
+                    >
+                      <span>{watchlistToast.msg}</span>
+                      <button onClick={() => setWatchlistToast(null)} className="text-slate-400 hover:text-white ml-2">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-amber-400 font-bold text-xs flex items-center space-x-1">
+                        <Star className="w-3.5 h-3.5 fill-current" />
+                        <span>เหรียญใน Watchlist ปัจจุบัน:</span>
+                      </span>
+                      <span className="text-[11px] text-slate-400 font-mono bg-slate-800 px-2 py-0.5 rounded-full">
+                        {currentWatchlist.length} เหรียญ
+                      </span>
+                    </div>
+
+                    {/* Quick Preset Buttons */}
+                    <div className="flex items-center space-x-1.5 text-[11px]">
+                      <span className="text-slate-500">พรีเซ็ตด่วน:</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleApplyPreset(['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'XRPUSDT']);
+                          triggerToast('เปลี่ยนเป็นพรีเซ็ต Top 5 สำเร็จ', 'success');
+                        }}
+                        className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition cursor-pointer"
+                      >
+                        Top 5
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleApplyPreset(['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT', 'DOGEUSDT', 'ADAUSDT', 'AVAXUSDT', 'SUIUSDT', 'LINKUSDT']);
+                          triggerToast('เปลี่ยนเป็นพรีเซ็ต Top 10 สำเร็จ', 'success');
+                        }}
+                        className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition cursor-pointer"
+                      >
+                        Top 10
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleApplyPreset(['DOGEUSDT', 'PEPEUSDT', 'SHIBUSDT', 'BONKUSDT', 'FLOKIUSDT']);
+                          triggerToast('เปลี่ยนเป็นพรีเซ็ต Meme Coins สำเร็จ', 'success');
+                        }}
+                        className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition cursor-pointer"
+                      >
+                        Meme
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleApplyPreset(['SOLUSDT', 'BNBUSDT', 'ADAUSDT', 'AVAXUSDT', 'NEARUSDT', 'SUIUSDT', 'APTUSDT']);
+                          triggerToast('เปลี่ยนเป็นพรีเซ็ต Layer 1 สำเร็จ', 'success');
+                        }}
+                        className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 transition cursor-pointer"
+                      >
+                        Layer 1
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Coin Badges */}
+                  <div className="flex flex-wrap gap-1.5">
+                    {currentWatchlist.map((sym) => (
+                      <span
+                        key={sym}
+                        className="inline-flex items-center space-x-1.5 bg-amber-500/10 border border-amber-500/30 text-amber-300 px-2.5 py-1 rounded-lg text-xs font-mono font-semibold group"
+                      >
+                        <span
+                          className="cursor-pointer hover:underline hover:text-white transition"
+                          onClick={() => onSelectSymbol && onSelectSymbol(sym)}
+                          title="คลิกเพื่อดูกราฟเหรียญนี้"
+                        >
+                          {sym.replace('USDT', '')}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleRemoveSymbol(sym);
+                            triggerToast(`ลบ ${sym.replace('USDT', '')} ออกจาก Watchlist เรียบร้อย`, 'warning');
+                          }}
+                          className="text-amber-400/60 hover:text-rose-400 p-0.5 transition cursor-pointer"
+                          title={`ลบ ${sym} ออกจาก Watchlist`}
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+
+                  {/* 🔍 Search Box & Quick Add Symbol */}
+                  <div className="space-y-2 pt-1">
+                    <div className="relative">
+                      <div className="flex items-center space-x-2">
+                        <div className="relative flex-1">
+                          <Search className="w-4 h-4 text-amber-400/70 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          <input
+                            type="text"
+                            value={watchlistSearchInput}
+                            onChange={(e) => {
+                              setWatchlistSearchInput(e.target.value.toUpperCase());
+                              setIsSearchDropdownOpen(true);
+                            }}
+                            onFocus={() => setIsSearchDropdownOpen(true)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && watchlistSearchInput.trim()) {
+                                handleAddCustomSymbol(watchlistSearchInput);
+                              }
+                            }}
+                            placeholder="พิมพ์ค้นหาหรือใส่ชื่อเหรียญ เช่น NEAR, PEPE, TAO, ONDO, WIF..."
+                            className="w-full pl-9 pr-8 py-2 bg-slate-800 border border-slate-700 rounded-xl text-xs text-white placeholder-slate-400 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500/40 font-mono transition"
+                          />
+                          {watchlistSearchInput && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setWatchlistSearchInput('');
+                                setIsSearchDropdownOpen(false);
+                              }}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white p-1 cursor-pointer"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleAddCustomSymbol(watchlistSearchInput)}
+                          disabled={!watchlistSearchInput.trim()}
+                          className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:opacity-40 disabled:cursor-not-allowed text-slate-950 font-bold text-xs rounded-xl shadow-md transition flex items-center space-x-1 shrink-0 cursor-pointer"
+                        >
+                          <Plus className="w-4 h-4" />
+                          <span>+ เพิ่มเหรียญ</span>
+                        </button>
+                      </div>
+
+                      {/* Autocomplete Search Dropdown */}
+                      {isSearchDropdownOpen && cleanQuery.length > 0 && (
+                        <div className="absolute left-0 right-0 top-full mt-1.5 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-30 overflow-hidden divide-y divide-slate-800/80 max-h-56 overflow-y-auto">
+                          {suggestions.map((sym) => (
+                            <button
+                              key={sym}
+                              type="button"
+                              onClick={() => handleAddCustomSymbol(sym)}
+                              className="w-full px-3.5 py-2 text-left hover:bg-slate-800 flex items-center justify-between text-xs transition group cursor-pointer"
+                            >
+                              <div className="flex items-center space-x-2">
+                                <span className="font-mono font-bold text-white group-hover:text-amber-300">
+                                  {sym.replace('USDT', '')}
+                                </span>
+                                <span className="text-[10px] text-slate-400">/USDT</span>
+                              </div>
+                              <span className="text-[11px] text-amber-400/80 group-hover:text-amber-300 flex items-center space-x-1">
+                                <span>+ เพิ่มเข้า Watchlist</span>
+                              </span>
+                            </button>
+                          ))}
+
+                          {/* Direct Custom Add Button */}
+                          {!isQueryAlreadyInList && (
+                            <button
+                              type="button"
+                              onClick={() => handleAddCustomSymbol(formattedQuery)}
+                              className="w-full px-3.5 py-2.5 text-left bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 flex items-center justify-between text-xs font-medium transition cursor-pointer"
+                            >
+                              <span>+ เพิ่มเหรียญ <b className="font-mono font-bold text-white">{formattedQuery}</b> เข้า Watchlist ทันที</span>
+                              <span className="text-[10px] bg-amber-500/20 border border-amber-500/30 px-2 py-0.5 rounded text-amber-200">
+                                กด Enter ↵
+                              </span>
+                            </button>
+                          )}
+
+                          {isQueryAlreadyInList && suggestions.length === 0 && (
+                            <div className="px-3.5 py-2.5 text-xs text-slate-400 italic">
+                              เหรียญ {formattedQuery} มีอยู่ใน Watchlist แล้ว
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Quick Select from popular pairs as fallback */}
+                    <div className="flex items-center space-x-2 pt-0.5">
+                      <span className="text-[11px] text-slate-500">หรือเลือกจากลิสต์:</span>
+                      <select
+                        value={selectedAddSymbol}
+                        onChange={(e) => {
+                          if (e.target.value) {
+                            handleAddCustomSymbol(e.target.value);
+                            setSelectedAddSymbol('');
+                          }
+                        }}
+                        className="px-2.5 py-1 bg-slate-800 border border-slate-700 rounded-lg text-xs text-slate-300 focus:outline-none focus:border-amber-500 cursor-pointer"
+                      >
+                        <option value="">-- เลือกเหรียญยอดนิยมอื่นๆ --</option>
+                        {ALL_BINANCE_USDT_PAIRS.filter((p) => !currentWatchlist.includes(p)).map((p) => (
+                          <option key={p} value={p}>
+                            {p.replace('USDT', '')} (USDT)
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           {/* Trading Direction Mode Selector */}
@@ -508,7 +889,8 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
                   min="5"
                   step="5"
                   value={fixedUsdt}
-                  onChange={(e) => setFixedUsdt(Math.max(5, parseFloat(e.target.value) || 5))}
+                  onChange={(e) => setFixedUsdt(e.target.value === '' ? '' : e.target.value)}
+                  onBlur={() => setFixedUsdt((prev) => Math.max(5, Number(prev) || 20))}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-white font-mono text-sm font-bold focus:border-emerald-500"
                   placeholder="เช่น 20 USDT"
                 />
@@ -918,13 +1300,18 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
                     min="1"
                     max="20"
                     disabled={!isEditing}
-                    value={configForm.maxOpenPositions ?? 5}
+                    value={configForm.maxOpenPositions !== undefined && configForm.maxOpenPositions !== null ? configForm.maxOpenPositions : ''}
                     onChange={(e) =>
                       setConfigForm({
                         ...configForm,
                         maxOpenPositions: e.target.value === '' ? ('' as any) : Number(e.target.value),
                       })
                     }
+                    onBlur={() => {
+                      if (configForm.maxOpenPositions === '' || configForm.maxOpenPositions === undefined) {
+                        setConfigForm((prev) => ({ ...prev, maxOpenPositions: 5 }));
+                      }
+                    }}
                     className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono focus:border-emerald-500 disabled:opacity-60"
                   />
                 </div>
@@ -1015,17 +1402,22 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
                     <span className="text-slate-300 font-mono text-[11px]">Trailing %:</span>
                     <input
                       type="number"
-                      min="1"
+                      min="0.5"
                       max="50"
                       step="0.5"
                       disabled={!isEditing || !configForm.useTrailingStop}
-                      value={configForm.trailingStopPercent ?? 7}
+                      value={configForm.trailingStopPercent !== undefined && configForm.trailingStopPercent !== null ? configForm.trailingStopPercent : ''}
                       onChange={(e) =>
                         setConfigForm({
                           ...configForm,
-                          trailingStopPercent: Number(e.target.value) || 7,
+                          trailingStopPercent: e.target.value === '' ? ('' as any) : Number(e.target.value),
                         })
                       }
+                      onBlur={() => {
+                        if (configForm.trailingStopPercent === '' || configForm.trailingStopPercent === undefined) {
+                          setConfigForm((prev) => ({ ...prev, trailingStopPercent: 7 }));
+                        }
+                      }}
                       className="w-16 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-purple-300 font-bold font-mono text-center focus:border-purple-500 disabled:opacity-50"
                     />
                     <span className="text-slate-400 text-[11px] font-mono">% จากจุดสูงสุด</span>

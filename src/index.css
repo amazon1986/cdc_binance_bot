@@ -29,19 +29,22 @@
 
 @keyframes marquee {
   0% {
-    transform: translateX(0%);
+    transform: translate3d(0, 0, 0);
   }
   100% {
-    transform: translateX(-50%);
+    transform: translate3d(-50%, 0, 0);
   }
 }
 
 .animate-marquee {
   display: flex;
   width: max-content;
-  animation: marquee 90s linear infinite;
+  will-change: transform;
+  transform: translate3d(0, 0, 0);
+  animation: marquee 85s linear infinite;
 }
 
-.animate-marquee:hover {
+.animate-marquee:hover,
+.group:hover .animate-marquee {
   animation-play-state: paused;
 }

@@ -26,6 +26,7 @@ import {
   Layers,
   ChevronRight,
   ExternalLink,
+  RotateCcw,
 } from 'lucide-react';
 
 interface BinanceWalletViewProps {
@@ -36,6 +37,7 @@ interface BinanceWalletViewProps {
   onOpenSettings: () => void;
   onSelectSymbol?: (symbol: string) => void;
   onClosePaperPosition?: (symbol: string) => void;
+  onResetPaperAccount?: () => void;
 }
 
 export const BinanceWalletView: React.FC<BinanceWalletViewProps> = ({
@@ -46,6 +48,7 @@ export const BinanceWalletView: React.FC<BinanceWalletViewProps> = ({
   onOpenSettings,
   onSelectSymbol,
   onClosePaperPosition,
+  onResetPaperAccount,
 }) => {
   const [walletSubTab, setWalletSubTab] = useState<'live' | 'paper'>('live');
   const [walletData, setWalletData] = useState<BinanceWalletData | null>(null);
@@ -164,6 +167,18 @@ export const BinanceWalletView: React.FC<BinanceWalletViewProps> = ({
               <span>พอร์ตจำลอง (Paper)</span>
             </button>
           </div>
+
+          {/* Reset Paper Account Button */}
+          {walletSubTab === 'paper' && onResetPaperAccount && (
+            <button
+              onClick={onResetPaperAccount}
+              className="flex items-center space-x-1.5 px-3 py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 hover:text-white rounded-xl text-xs font-semibold border border-rose-500/30 transition cursor-pointer shadow-sm"
+              title="รีเซ็ตยอดเงินพอร์ตจำลองกลับเป็น $10,000 USDT และล้างสัญญาจำลองทั้งหมด"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-rose-400" />
+              <span>รีเซ็ตพอร์ต ($10,000)</span>
+            </button>
+          )}
 
           {/* Refresh Button */}
           {walletSubTab === 'live' && hasApiKeys && (
@@ -739,7 +754,7 @@ export const BinanceWalletView: React.FC<BinanceWalletViewProps> = ({
           {/* Top Paper Overview Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* Paper Total Equity */}
-            <div className="bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-800 p-5 rounded-2xl shadow-lg">
+            <div className="bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-800 p-5 rounded-2xl shadow-lg relative">
               <div className="flex items-center justify-between text-slate-400 text-xs mb-2">
                 <span>มูลค่าพอร์ตจำลองรวม (Paper Equity)</span>
                 <Coins className="w-4 h-4 text-emerald-400" />

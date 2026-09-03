@@ -10,6 +10,7 @@ import {
   BinanceTicker24h,
   TelegramConfig,
   BinanceWalletData,
+  AuthUser,
 } from './types';
 import {
   getStoredBotConfig,
@@ -24,6 +25,7 @@ import {
   getStoredLogs,
   addBotLog,
   getStoredSymbols,
+  saveStoredSymbols,
   getStoredTelegramConfig,
   saveTelegramConfig,
   DEFAULT_PAPER_ACCOUNT,
@@ -67,6 +69,9 @@ import { TradeHistoryTable } from './components/TradeHistoryTable';
 import { TradingStats } from './components/TradingStats';
 import { CoffeeDonation } from './components/CoffeeDonation';
 import { BinanceWalletView } from './components/BinanceWalletView';
+import { LoginModal } from './components/LoginModal';
+import { ProfileModal } from './components/ProfileModal';
+import { AuthGateView } from './components/AuthGateView';
 
 
 /**
@@ -128,6 +133,37 @@ export default function App() {
     setTimeout(() => setToastMessage(null), 5000);
   };
 
+  // Auth State & Modals (Restore session if exists, otherwise null)
+  const [authUser, setAuthUser] = useState<AuthUser | null>(() => {
+    try {
+      const saved = localStorage.getItem('cdc_auth_session') || sessionStorage.getItem('cdc_auth_session');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.username) {
+          return parsed;
+        }
+      }
+    } catch {}
+    return null;
+  });
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+
+  const handleOpenLogin = useCallback(() => setIsLoginModalOpen(true), []);
+  const handleOpenProfile = useCallback(() => setIsProfileModalOpen(true), []);
+  const handleLogout = useCallback(() => {
+    localStorage.removeItem('cdc_auth_session');
+    sessionStorage.removeItem('cdc_auth_session');
+    setAuthUser(null);
+    setIsLoginModalOpen(false);
+    showToast('ออกจากระบบเรียบร้อยแล้ว หน้าจอและบอทถูกล็อค 🔒', 'info');
+  }, []);
+  const handleLoginSuccess = useCallback((user: AuthUser) => {
+    setAuthUser(user);
+    setIsLoginModalOpen(false);
+    showToast(`ยินดีต้อนรับคุณ ${user.username} เข้าสู่ระบบเรียบร้อยแล้ว`, 'info');
+  }, []);
+
   const [currentPriceInfo, setCurrentPriceInfo] = useState<{ symbol: string; price: number }>({
     symbol: 'BTCUSDT',
     price: 0,
@@ -161,28 +197,24 @@ export default function App() {
     }
   }, [botConfig.symbol, botConfig.timeframe, chartTimeframe, botConfig.fastEmaPeriod, botConfig.slowEmaPeriod]);
 
-  // 2. Fetch All Crypto Ticker Prices for Header Running Ticker Tape (REST Initial Load / Fallback)
+  // 2. Fetch All Crypto Ticker Prices for Header Running Ticker Tape (Stable Fixed Order)
   const loadTickers = useCallback(async () => {
     try {
       const raw = await fetchBinanceTicker24h();
       if (raw && raw.length > 0) {
-        const popularSet = new Set(POPULAR_PAIRS);
-        const filtered = raw
-          .filter((t) => popularSet.has(t.symbol) || (t.symbol.endsWith('USDT') && !t.symbol.includes('UP') && !t.symbol.includes('DOWN')))
-          .sort((a, b) => {
-            const indexA = POPULAR_PAIRS.indexOf(a.symbol);
-            const indexB = POPULAR_PAIRS.indexOf(b.symbol);
-            if (indexA !== -1 && indexB !== -1) return indexA - indexB;
-            if (indexA !== -1) return -1;
-            if (indexB !== -1) return 1;
-            return b.quoteVolume - a.quoteVolume;
-          })
-          .slice(0, 30);
+        const tickerMap = new Map<string, BinanceTicker24h>();
+        for (const t of raw) {
+          tickerMap.set(t.symbol, t);
+        }
+        const stableList: BinanceTicker24h[] = [];
+        for (const sym of POPULAR_PAIRS) {
+          const item = tickerMap.get(sym);
+          if (item) stableList.push(item);
+        }
+        setAllTickers(stableList);
 
-        setAllTickers(filtered);
-
-        const btc = raw.find((t) => t.symbol === 'BTCUSDT');
-        const eth = raw.find((t) => t.symbol === 'ETHUSDT');
+        const btc = tickerMap.get('BTCUSDT');
+        const eth = tickerMap.get('ETHUSDT');
         if (btc) setBtcPrice(btc.lastPrice);
         if (eth) setEthPrice(eth.lastPrice);
       }
@@ -191,27 +223,29 @@ export default function App() {
     }
   }, []);
 
-  // 3. Real-Time WebSocket Streaming for All Market Tickers (0 REST Weight)
+  // 3. Real-Time WebSocket Streaming for All Market Tickers (Throttled to 3.5s for 60fps buttery-smooth scrolling)
   useEffect(() => {
+    let lastTickerUpdate = 0;
     const unsubscribe = subscribeAllMiniTickers((tickers) => {
       if (!tickers || tickers.length === 0) return;
-      const popularSet = new Set(POPULAR_PAIRS);
-      const filtered = tickers
-        .filter((t) => popularSet.has(t.symbol) || (t.symbol.endsWith('USDT') && !t.symbol.includes('UP') && !t.symbol.includes('DOWN')))
-        .sort((a, b) => {
-          const indexA = POPULAR_PAIRS.indexOf(a.symbol);
-          const indexB = POPULAR_PAIRS.indexOf(b.symbol);
-          if (indexA !== -1 && indexB !== -1) return indexA - indexB;
-          if (indexA !== -1) return -1;
-          if (indexB !== -1) return 1;
-          return b.quoteVolume - a.quoteVolume;
-        })
-        .slice(0, 30);
+      const now = Date.now();
+      // Throttle React state updates to every 12s so the browser GPU can run the marquee smoothly without main thread interruptions
+      if (now - lastTickerUpdate < 12000 && lastTickerUpdate !== 0) return;
+      lastTickerUpdate = now;
 
-      setAllTickers(filtered);
+      const tickerMap = new Map<string, BinanceTicker24h>();
+      for (const t of tickers) {
+        tickerMap.set(t.symbol, t);
+      }
+      const stableList: BinanceTicker24h[] = [];
+      for (const sym of POPULAR_PAIRS) {
+        const item = tickerMap.get(sym);
+        if (item) stableList.push(item);
+      }
+      setAllTickers(stableList);
 
-      const btc = tickers.find((t) => t.symbol === 'BTCUSDT');
-      const eth = tickers.find((t) => t.symbol === 'ETHUSDT');
+      const btc = tickerMap.get('BTCUSDT');
+      const eth = tickerMap.get('ETHUSDT');
       if (btc) setBtcPrice(btc.lastPrice);
       if (eth) setEthPrice(eth.lastPrice);
     });
@@ -382,11 +416,57 @@ export default function App() {
   }, [allTickers, currentPriceInfo]);
 
   // Save config state updates to storage and cloud server
-  const handleSaveBotConfig = async (updated: BotConfig) => {
+  const handleSaveBotConfig = useCallback(async (updated: BotConfig) => {
     setBotConfig(updated);
     saveBotConfig(updated);
+    if (updated.watchlist && updated.watchlist.length > 0) {
+      saveStoredSymbols(updated.watchlist);
+    }
     await saveBotServerConfig(updated);
-  };
+  }, []);
+
+  const handleOpenSettings = useCallback(() => setIsSettingsOpen(true), []);
+  const handleOpenTelegramSettings = useCallback(() => setIsTelegramModalOpen(true), []);
+  const handleToggleBot = useCallback(async (forcedState?: boolean) => {
+    const nextState = typeof forcedState === 'boolean' ? forcedState : !botConfig.isActive;
+
+    // 1. Immediate optimistic UI state update
+    setBotConfig((prev) => {
+      const updated = { ...prev, isActive: nextState };
+      saveBotConfig(updated);
+      return updated;
+    });
+
+    // 2. Call atomic server endpoint /api/bot/toggle
+    try {
+      const res = await toggleBotServer(nextState);
+      if (res.success) {
+        setBotConfig((prev) => {
+          const updated = { ...prev, isActive: res.isActive };
+          saveBotConfig(updated);
+          return updated;
+        });
+        showToast(res.isActive ? 'เปิดระบบอัตโนมัติ CDC Bot เรียบร้อย 🟢' : 'หยุดระบบอัตโนมัติ CDC Bot แล้ว 🔴', 'info');
+      } else {
+        const fallbackConfig = { ...botConfig, isActive: nextState };
+        await saveBotServerConfig(fallbackConfig);
+        showToast(nextState ? 'เปิดระบบอัตโนมัติ CDC Bot แล้ว 🟢' : 'หยุดระบบอัตโนมัติ CDC Bot แล้ว 🔴', 'info');
+      }
+    } catch {
+      const fallbackConfig = { ...botConfig, isActive: nextState };
+      await saveBotServerConfig(fallbackConfig);
+      showToast(nextState ? 'เปิดระบบอัตโนมัติ CDC Bot แล้ว 🟢' : 'หยุดระบบอัตโนมัติ CDC Bot แล้ว 🔴', 'info');
+    }
+  }, [botConfig]);
+
+  const handleSelectSymbol = useCallback((selectedSymbol: string) => {
+    setBotConfig((prev) => {
+      handleSaveBotConfig({ ...prev, symbol: selectedSymbol });
+      return { ...prev, symbol: selectedSymbol };
+    });
+    setActiveTab('chart');
+    showToast(`เลือกเหรียญ ${selectedSymbol} ขึ้นชาร์ตเรียบร้อยแล้ว`, 'info');
+  }, [handleSaveBotConfig]);
 
   const handleSaveBinanceKeys = async (updatedKeys: BinanceApiKeys) => {
     setBinanceKeys(updatedKeys);
@@ -576,37 +656,39 @@ export default function App() {
         </div>
       )}
 
-      {/* Header Bar */}
-      <Header
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        botConfig={botConfig}
-        paperAccount={paperAccount}
-        liveWallet={liveWalletData}
-        onRefreshLiveWallet={refreshLiveWallet}
-        isLoadingLiveWallet={isLoadingLiveWallet}
-        onOpenSettings={() => setIsSettingsOpen(true)}
-        onOpenTelegramSettings={() => setIsTelegramModalOpen(true)}
-        isTelegramEnabled={telegramConfig.enabled}
-        onResetPaperAccount={handleResetPaperAccount}
-        onToggleBot={() => {
-          const nextState = !botConfig.isActive;
-          handleSaveBotConfig({ ...botConfig, isActive: nextState });
-          showToast(nextState ? 'เปิดระบบอัตโนมัติ CDC Bot แล้ว' : 'หยุดระบบอัตโนมัติ CDC Bot แล้ว', 'info');
-        }}
-        btcPrice={btcPrice}
-        ethPrice={ethPrice}
-        tickers={allTickers}
-        onSelectSymbol={(selectedSymbol) => {
-          handleSaveBotConfig({ ...botConfig, symbol: selectedSymbol });
-          setActiveTab('chart');
-          showToast(`เลือกเหรียญ ${selectedSymbol} ขึ้นชาร์ตเรียบร้อยแล้ว`, 'info');
-        }}
-      />
+      {/* Header Bar (Only visible after login) */}
+      {authUser && (
+        <Header
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          botConfig={botConfig}
+          paperAccount={paperAccount}
+          liveWallet={liveWalletData}
+          onRefreshLiveWallet={refreshLiveWallet}
+          isLoadingLiveWallet={isLoadingLiveWallet}
+          onOpenSettings={handleOpenSettings}
+          onOpenTelegramSettings={handleOpenTelegramSettings}
+          isTelegramEnabled={telegramConfig.enabled}
+          onResetPaperAccount={handleResetPaperAccount}
+          onToggleBot={handleToggleBot}
+          btcPrice={btcPrice}
+          ethPrice={ethPrice}
+          tickers={allTickers}
+          onSelectSymbol={handleSelectSymbol}
+          authUser={authUser}
+          onOpenLogin={handleOpenLogin}
+          onOpenProfile={handleOpenProfile}
+          onLogout={handleLogout}
+        />
+      )}
 
       {/* Main Content Body */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 space-y-6">
-        {activeTab === 'chart' && (
+        {!authUser ? (
+          <AuthGateView onLoginSuccess={handleLoginSuccess} />
+        ) : (
+          <>
+            {activeTab === 'chart' && (
           <div className="space-y-6">
             <CDCChart
               candles={candles}
@@ -629,7 +711,7 @@ export default function App() {
               paperAccount={paperAccount}
               currentPrice={currentPrice}
               onSaveConfig={handleSaveBotConfig}
-              onToggleBot={() => handleSaveBotConfig({ ...botConfig, isActive: !botConfig.isActive })}
+              onToggleBot={handleToggleBot}
               onManualBuy={handleManualBuy}
               onManualShort={handleManualShort}
               onManualSell={handleManualSell}
@@ -639,9 +721,12 @@ export default function App() {
               onRefreshLiveWallet={refreshLiveWallet}
               binanceKeys={binanceKeys}
               onOpenSettings={() => setIsSettingsOpen(true)}
-              onClearLogs={() => {
+              onSelectSymbol={handleSelectSymbol}
+              onClearLogs={async () => {
                 localStorage.removeItem('cdc_bot_logs_v2');
                 setBotLogs([]);
+                await clearBotServerLogs();
+                showToast('ล้างบันทึกกิจกรรมบอท (Console Logs) เรียบร้อยแล้ว', 'info');
               }}
             />
           </div>
@@ -660,6 +745,7 @@ export default function App() {
               showToast(`เลือกเหรียญ ${selectedSymbol} ขึ้นชาร์ตเรียบร้อยแล้ว`, 'info');
             }}
             onClosePaperPosition={handleCloseSpecificPosition}
+            onResetPaperAccount={handleResetPaperAccount}
           />
         )}
 
@@ -668,9 +754,10 @@ export default function App() {
         {activeTab === 'stats' && (
           <TradingStats
             trades={tradeHistory}
-            onClearStats={() => {
+            onClearStats={async () => {
               localStorage.removeItem('cdc_trade_history_v2');
               setTradeHistory([]);
+              await clearBotServerTradeHistory('ALL');
               showToast('ล้างสถิติและประวัติการเทรดทั้งหมดแล้ว', 'info');
             }}
           />
@@ -682,6 +769,11 @@ export default function App() {
               handleSaveBotConfig({ ...botConfig, symbol: selectedSymbol });
               setActiveTab('chart');
               showToast(`เลือกเหรียญ ${selectedSymbol} ขึ้นชาร์ตและบอทเรียบร้อย`, 'info');
+            }}
+            watchlist={botConfig.watchlist}
+            onUpdateWatchlist={(newWatchlist) => {
+              const updatedConfig = { ...botConfig, watchlist: newWatchlist };
+              handleSaveBotConfig(updatedConfig);
             }}
           />
         )}
@@ -697,34 +789,36 @@ export default function App() {
 
         {activeTab === 'coffee' && <CoffeeDonation />}
 
-        {activeTab === 'history' && (
-          <TradeHistoryTable
-            trades={tradeHistory}
-            onClearHistory={async () => {
-              localStorage.removeItem('cdc_trade_history_v2');
-              await clearBotServerTradeHistory('PAPER');
-              setTradeHistory([]);
-              showToast('ล้างประวัติการเทรดพอร์ตจำลองแล้ว', 'info');
-            }}
-            onClearLiveHistory={async () => {
-              await clearBotServerTradeHistory('BINANCE_LIVE');
-              const remaining = tradeHistory.filter((t) => t.mode !== 'BINANCE_LIVE');
-              setTradeHistory(remaining);
-              saveTradeHistory(remaining);
-              showToast('ลบประวัติคำสั่งซื้อขายจริง (Binance Live Log) เรียบร้อยแล้ว', 'info');
-            }}
-            activePositions={paperAccount.activePositions}
-            onClosePosition={handleCloseSpecificPosition}
-            allTickers={allTickers}
-            binanceKeys={binanceKeys}
-            botConfig={botConfig}
-            onOpenSettings={() => setIsSettingsOpen(true)}
-            onSelectSymbol={(selectedSymbol) => {
-              handleSaveBotConfig({ ...botConfig, symbol: selectedSymbol });
-              setActiveTab('chart');
-              showToast(`เลือกเหรียญ ${selectedSymbol} ขึ้นชาร์ตเรียบร้อยแล้ว`, 'info');
-            }}
-          />
+            {activeTab === 'history' && (
+              <TradeHistoryTable
+                trades={tradeHistory}
+                onClearHistory={async () => {
+                  localStorage.removeItem('cdc_trade_history_v2');
+                  await clearBotServerTradeHistory('PAPER');
+                  setTradeHistory([]);
+                  showToast('ล้างประวัติการเทรดพอร์ตจำลองแล้ว', 'info');
+                }}
+                onClearLiveHistory={async () => {
+                  await clearBotServerTradeHistory('BINANCE_LIVE');
+                  const remaining = tradeHistory.filter((t) => t.mode !== 'BINANCE_LIVE');
+                  setTradeHistory(remaining);
+                  saveTradeHistory(remaining);
+                  showToast('ลบประวัติคำสั่งซื้อขายจริง (Binance Live Log) เรียบร้อยแล้ว', 'info');
+                }}
+                activePositions={paperAccount.activePositions}
+                onClosePosition={handleCloseSpecificPosition}
+                allTickers={allTickers}
+                binanceKeys={binanceKeys}
+                botConfig={botConfig}
+                onOpenSettings={() => setIsSettingsOpen(true)}
+                onSelectSymbol={(selectedSymbol) => {
+                  handleSaveBotConfig({ ...botConfig, symbol: selectedSymbol });
+                  setActiveTab('chart');
+                  showToast(`เลือกเหรียญ ${selectedSymbol} ขึ้นชาร์ตเรียบร้อยแล้ว`, 'info');
+                }}
+              />
+            )}
+          </>
         )}
       </main>
 
@@ -745,6 +839,23 @@ export default function App() {
         config={telegramConfig}
         onSave={handleSaveTelegramConfig}
       />
+
+      {/* User Login Modal */}
+      <LoginModal
+        isOpen={isLoginModalOpen}
+        onClose={() => setIsLoginModalOpen(false)}
+        onLoginSuccess={handleLoginSuccess}
+      />
+
+      {/* User Profile Modal */}
+      {authUser && (
+        <ProfileModal
+          isOpen={isProfileModalOpen}
+          onClose={() => setIsProfileModalOpen(false)}
+          authUser={authUser}
+          onLogout={handleLogout}
+        />
+      )}
     </div>
   );
 }
