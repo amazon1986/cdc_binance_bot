@@ -754,7 +754,9 @@ async function runServerBotCycle() {
           }
 
           const returnUsdt = Math.max(0, margin + pnlUsdt);
-          serverState.paperAccount.usdtBalance += returnUsdt;
+          if (config.mode === 'PAPER') {
+            serverState.paperAccount.usdtBalance += returnUsdt;
+          }
           serverState.paperAccount.activePositions.splice(existingPosIndex, 1);
           serverState.paperAccount.totalTrades += 1;
           if (pnlUsdt > 0) {
@@ -893,7 +895,37 @@ ${isWin ? '📈' : '📉'} <b>ผลตอบแทน (PnL):</b> ${isWin ? '+' 
             ? currentPrice * (1 - 0.9 / lev)
             : currentPrice * (1 + 0.9 / lev);
 
-          if (config.mode === 'PAPER') {
+          let liveOrderId: string | number | undefined;
+
+          // If Live Mode, execute real order on Binance first
+          if (config.mode === 'BINANCE_LIVE') {
+            if (!serverState.liveApiKeys || !serverState.liveApiKeys.apiKey || !serverState.liveApiKeys.apiSecret) {
+              addServerLog(`⚠️ [LIVE AUTO 24/7] ไม่สามารถเปิดสัญญาจริง ${sym} ได้เนื่องจากยังไม่ได้ตั้งค่า Binance API Key`);
+              continue;
+            }
+
+            try {
+              const liveEntryRes = await executeLiveServerOrder({
+                symbol: sym,
+                side: targetSide === 'LONG' ? 'BUY' : 'SELL',
+                quantity: coinAmount,
+                leverage: lev,
+              });
+
+              if (liveEntryRes.success) {
+                liveOrderId = liveEntryRes.orderId;
+                addServerLog(`⚡ [LIVE AUTO 24/7] เปิดสัญญาจริง ${targetSide} ${sym} สำเร็จ (OrderId: ${liveOrderId})`);
+              } else {
+                addServerLog(`⚠️ [LIVE AUTO 24/7 FAILED] เปิดสัญญาจริง ${sym} ไม่สำเร็จ: ${liveEntryRes.error}`);
+                continue; // Do not record position if Binance rejected the order
+              }
+            } catch (err: any) {
+              console.error('Live entry order error:', err);
+              addServerLog(`⚠️ [LIVE AUTO 24/7 ERROR] เกิดข้อผิดพลาดในการส่งคำสั่ง ${sym}: ${err.message}`);
+              continue;
+            }
+          } else {
+            // Paper Mode: deduct virtual USDT balance
             serverState.paperAccount.usdtBalance -= tradeUsdt;
           }
 
@@ -906,6 +938,8 @@ ${isWin ? '📈' : '📉'} <b>ผลตอบแทน (PnL):</b> ${isWin ? '+' 
             marginUsdt: tradeUsdt,
             leverage: lev,
             liquidationPrice: Number(liqPrice.toFixed(6)),
+            highestPrice: currentPrice,
+            lowestPrice: currentPrice,
             entryTime: Date.now(),
             currentPnlUsdt: 0,
             currentPnlPercent: 0,
@@ -913,28 +947,6 @@ ${isWin ? '📈' : '📉'} <b>ผลตอบแทน (PnL):</b> ${isWin ? '+' 
 
           serverState.paperAccount.activePositions.push(newPos);
           lastTradedBarTimes.set(barKey, confirmedCandle.time);
-
-          let liveOrderId: string | number | undefined;
-
-          // If Live Mode and API keys are present, execute live entry on Binance
-          if (config.mode === 'BINANCE_LIVE' && serverState.liveApiKeys) {
-            try {
-              const liveEntryRes = await executeLiveServerOrder({
-                symbol: sym,
-                side: targetSide === 'LONG' ? 'BUY' : 'SELL',
-                quantity: coinAmount,
-                leverage: lev,
-              });
-              if (liveEntryRes.success) {
-                liveOrderId = liveEntryRes.orderId;
-                addServerLog(`⚡ [LIVE AUTO 24/7] เปิดสัญญาจริง ${targetSide} ${sym} สำเร็จ (OrderId: ${liveOrderId})`);
-              } else {
-                addServerLog(`⚠️ [LIVE AUTO 24/7 FAILED] เปิดสัญญาจริง ${sym} ไม่สำเร็จ: ${liveEntryRes.error}`);
-              }
-            } catch (err: any) {
-              console.error('Live entry order error:', err);
-            }
-          }
 
           const trade: ExecutedTrade = {
             id: `trade_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
@@ -1370,7 +1382,7 @@ app.post('/api/bot/reset-paper', (req, res) => {
   serverState.tradeHistory = [];
   addServerLog('🔄 รีเซ็ตพอร์ตจำลอง (Paper Account) เป็น $10,000 USDT เรียบร้อยแล้ว');
   saveServerState();
-  return res.json({ success: true });
+  return res.json({ success: true, paperAccount: serverState.paperAccount });
 });
 
 // 8. Binance API Keys Storage
