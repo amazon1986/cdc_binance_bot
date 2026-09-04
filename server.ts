@@ -10,7 +10,7 @@ import rateLimit from 'express-rate-limit';
 import cors from 'cors';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
-import { BotConfig, PaperAccount, PaperPosition, ExecutedTrade, KlineData, Timeframe, TelegramConfig } from './src/types';
+import { BotConfig, PaperAccount, PaperPosition, ExecutedTrade, KlineData, Timeframe, TelegramConfig, AuthUser } from './src/types';
 import { calculateCDCActionZone, getCrossoverInfo } from './src/lib/cdcIndicator';
 import { POPULAR_PAIRS } from './src/lib/binanceApi';
 
