@@ -46,7 +46,7 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
   buyOnSignal: ['BLUE', 'GREEN'], // 🎯 สัญญาณฟ้าแรก หรือ เขียวแรกคอนเฟิร์มตามลุงโฉลก (Safe Confirmed Entry)
   sellOnSignal: ['RED'], // 🎯 ขายออก/Short เฉพาะสัญญาณแดงแรกคอนเฟิร์ม (Bearish Cash Out)
   mode: 'BINANCE_LIVE', // ⚡ Default เป็นกระเป๋าจริง Binance Live
-  scanMode: 'MULTI_SCAN', // 🎯 สแกนเปิดออเดอร์ทุกเหรียญอัตโนมัติ
+  scanMode: 'WATCHLIST', // 🎯 สแกนเฉพาะเหรียญใน Watchlist เป็นค่าเริ่มต้น
   watchlist: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'DOGEUSDT', 'ADAUSDT', 'XRPUSDT', 'SUIUSDT'],
   directionMode: 'BOTH', // 🎯 เล่นทั้งฝั่ง Long & Short
   isActive: false,
@@ -85,7 +85,7 @@ export function getStoredBotConfig(): BotConfig {
       trailingStopPercent: parsed.trailingStopPercent !== undefined ? parsed.trailingStopPercent : 7,
       useTrailingStop: parsed.useTrailingStop ?? false,
       useWhipsawProtection: parsed.useWhipsawProtection ?? true,
-      scanMode: parsed.scanMode || 'MULTI_SCAN',
+      scanMode: parsed.scanMode || 'WATCHLIST',
       watchlist: Array.isArray(parsed.watchlist) && parsed.watchlist.length > 0 ? parsed.watchlist : DEFAULT_BOT_CONFIG.watchlist,
       directionMode: parsed.directionMode || 'BOTH',
       buyOnSignal: parsed.buyOnSignal && parsed.buyOnSignal.length > 0 ? parsed.buyOnSignal : ['BLUE', 'GREEN'],

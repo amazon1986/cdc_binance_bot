@@ -17,7 +17,7 @@ import { KlineData, Timeframe, CDCZoneColor } from '../types';
 import { getStoredSymbols } from '../lib/botStore';
 import { getZoneColorHex } from '../lib/cdcIndicator';
 import { formatCryptoPrice } from '../lib/binanceApi';
-import { RefreshCw, Search, ChevronDown, Activity, Info, Zap, Layers, Maximize2 } from 'lucide-react';
+import { RefreshCw, Search, ChevronDown, Activity, Info, Zap, Layers, Maximize2, SlidersHorizontal, Check } from 'lucide-react';
 
 interface CDCChartProps {
   candles: KlineData[];
@@ -68,6 +68,7 @@ export const CDCChart: React.FC<CDCChartProps> = ({
   const [showRibbon, setShowRibbon] = useState(true);
   const [showSignalDots, setShowSignalDots] = useState(true);
   const [showCalloutBanner, setShowCalloutBanner] = useState(false); // 🚀 Clean view like TradingView (no bulky bubble blocking candles)
+  const [isMobileIndicatorOpen, setIsMobileIndicatorOpen] = useState(false);
   const [orderAmount, setOrderAmount] = useState('0.01');
 
   // Hovered or latest candle state for top OHLC header
@@ -535,21 +536,21 @@ export const CDCChart: React.FC<CDCChartProps> = ({
   return (
     <div className="bg-[#131722] text-slate-200 rounded-xl border border-[#2a2e39] shadow-2xl overflow-hidden font-sans">
       {/* 1. TradingView Style Header Bar */}
-      <div className="bg-[#181c27] px-4 py-2.5 border-b border-[#2a2e39] flex flex-wrap items-center justify-between gap-3 text-xs">
-        {/* Left Section: Symbol, OHLC & Quick Buy/Sell Box */}
-        <div className="flex flex-wrap items-center gap-4">
+      <div className="bg-[#181c27] px-3 sm:px-4 py-2 sm:py-2.5 border-b border-[#2a2e39] flex flex-wrap items-center justify-between gap-2 text-xs">
+        {/* Left Section: Symbol Dropdown & Quick Buy/Sell */}
+        <div className="flex items-center space-x-2">
           {/* Symbol Dropdown Selector */}
           <div className="relative">
             <button
               onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-              className="flex items-center space-x-2 bg-[#2a2e39] hover:bg-[#363c4e] text-white px-3 py-1.5 rounded font-medium transition border border-slate-700/60"
+              className="flex items-center space-x-1.5 sm:space-x-2 bg-[#2a2e39] hover:bg-[#363c4e] text-white px-2.5 sm:px-3 py-1.5 rounded font-medium transition border border-slate-700/60 text-xs"
             >
-              <div className="w-5 h-5 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-[10px]">
+              <div className="w-4 h-4 sm:w-5 sm:h-5 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-[9px] sm:text-[10px]">
                 ₿
               </div>
-              <span className="font-semibold text-sm">{symbol.replace('USDT', ' / TetherUS')}</span>
-              <span className="text-slate-400 text-[10px]">· {timeframe.toUpperCase()} · Binance</span>
-              <ChevronDown className="w-3.5 h-3.5 text-slate-400 ml-1" />
+              <span className="font-semibold text-xs sm:text-sm">{symbol.replace('USDT', '')}</span>
+              <span className="text-slate-400 text-[10px] hidden sm:inline">/ USDT · {timeframe.toUpperCase()}</span>
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400 ml-0.5" />
             </button>
 
             {isDropdownOpen && (
@@ -585,94 +586,42 @@ export const CDCChart: React.FC<CDCChartProps> = ({
             )}
           </div>
 
-          {/* OHLC Bar Readout */}
-          {activeDisplayCandle && (
-            <div className="hidden lg:flex items-center space-x-3 text-[11px] font-mono">
-              <span className="text-slate-400">
-                O: <span className={ohlcChange.isPositive ? 'text-emerald-400' : 'text-rose-400'}>{formatCryptoPrice(activeDisplayCandle.open)}</span>
-              </span>
-              <span className="text-slate-400">
-                H: <span className="text-slate-200">{formatCryptoPrice(activeDisplayCandle.high)}</span>
-              </span>
-              <span className="text-slate-400">
-                L: <span className="text-slate-200">{formatCryptoPrice(activeDisplayCandle.low)}</span>
-              </span>
-              <span className="text-slate-400">
-                C: <span className={ohlcChange.isPositive ? 'text-emerald-400' : 'text-rose-400'}>{formatCryptoPrice(activeDisplayCandle.close)}</span>
-              </span>
-              <span className={`font-bold ${ohlcChange.isPositive ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {ohlcChange.isPositive ? '+' : ''}
-                {formatCryptoPrice(ohlcChange.diff)} ({ohlcChange.percent.toFixed(2)}%)
-              </span>
-            </div>
-          )}
-
-          {/* Quick Buy/Sell Trading Pill Widget (Matching User Screenshot Top-Left) */}
-          {latestCandle && (
-            <div className="flex items-center bg-[#131722] border border-[#2a2e39] rounded-lg overflow-hidden shadow-inner p-0.5">
-              <button
-                onClick={() => alert(`สั่งขาย SELL ${symbol} @ ${formatCryptoPrice(latestCandle.close)}`)}
-                className="bg-rose-600/90 hover:bg-rose-600 text-white font-bold px-2.5 py-1 text-[11px] transition flex items-center space-x-1"
-              >
-                <span>{formatCryptoPrice(latestCandle.close).replace('$', '')}</span>
-                <span className="text-[9px] bg-black/30 px-1 rounded uppercase">SELL</span>
-              </button>
-
-              <div className="px-2 py-0.5 text-[11px] text-slate-300 font-mono bg-[#181c27] border-x border-[#2a2e39]">
-                <input
-                  type="text"
-                  value={orderAmount}
-                  onChange={(e) => setOrderAmount(e.target.value)}
-                  className="w-10 text-center bg-transparent focus:outline-none text-white font-semibold"
-                />
-              </div>
-
-              <button
-                onClick={() => alert(`สั่งซื้อ BUY ${symbol} @ ${formatCryptoPrice(latestCandle.close)}`)}
-                className="bg-blue-600/90 hover:bg-blue-600 text-white font-bold px-2.5 py-1 text-[11px] transition flex items-center space-x-1"
-              >
-                <span>{formatCryptoPrice(latestCandle.close).replace('$', '')}</span>
-                <span className="text-[9px] bg-black/30 px-1 rounded uppercase">BUY</span>
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Right Section: Timeframes & Indicator Toggles */}
-        <div className="flex items-center space-x-2">
           {/* Bot Strategy Timeframe Status Badge / Selector */}
           {botTimeframe && (
             <div
-              className="flex items-center space-x-1.5 px-2.5 py-1 bg-slate-900/90 border border-slate-700/80 rounded-md text-[10px]"
-              title="ไทม์เฟรมที่บอทใช้รันกลยุทธ์ซื้อขาย (คลิกเปลี่ยนได้ทันที)"
+              className="flex items-center space-x-1 px-2 py-1 bg-slate-900/90 border border-slate-700/80 rounded text-[10px]"
+              title="ไทม์เฟรมที่บอทใช้รันกลยุทธ์ซื้อขาย"
             >
               <span
                 className={`w-1.5 h-1.5 rounded-full ${
                   isBotActive ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'
                 }`}
               />
-              <span className="text-slate-400 font-medium hidden sm:inline">บอทกลยุทธ์:</span>
+              <span className="text-slate-400 font-medium hidden sm:inline">บอท:</span>
               <select
                 value={botTimeframe}
                 onChange={(e) => onBotTimeframeChange && onBotTimeframeChange(e.target.value as Timeframe)}
-                className="bg-transparent text-emerald-400 font-bold font-mono uppercase cursor-pointer focus:outline-none"
+                className="bg-transparent text-emerald-400 font-bold font-mono uppercase cursor-pointer focus:outline-none text-[10px]"
               >
                 <option value="15m" className="bg-slate-900 text-white">15M</option>
                 <option value="1h" className="bg-slate-900 text-white">1H</option>
                 <option value="4h" className="bg-slate-900 text-white">4H</option>
-                <option value="1d" className="bg-slate-900 text-white">1D (แนะนำ)</option>
+                <option value="1d" className="bg-slate-900 text-white">1D</option>
                 <option value="1w" className="bg-slate-900 text-white">1W</option>
               </select>
             </div>
           )}
+        </div>
 
-          {/* Timeframe Buttons */}
-          <div className="flex items-center bg-[#131722] p-0.5 rounded-md border border-[#2a2e39]">
+        {/* Right Section: Timeframe Selector & Indicators */}
+        <div className="flex items-center space-x-1 sm:space-x-1.5">
+          {/* Timeframe Buttons Bar (Touch-pan horizontal scroll) */}
+          <div className="flex items-center bg-[#131722] p-0.5 rounded border border-[#2a2e39] overflow-x-auto scrollbar-none touch-pan-x max-w-[190px] sm:max-w-none">
             {TIMEFRAMES.map((tf) => (
               <button
                 key={tf.value}
                 onClick={() => onTimeframeChange(tf.value)}
-                className={`px-2 py-1 text-[11px] font-semibold rounded transition ${
+                className={`px-1.5 sm:px-2 py-1 text-[10px] sm:text-[11px] font-semibold rounded transition whitespace-nowrap ${
                   timeframe === tf.value
                     ? 'bg-[#2a2e39] text-white shadow-sm'
                     : 'text-slate-400 hover:text-slate-200'
@@ -683,8 +632,8 @@ export const CDCChart: React.FC<CDCChartProps> = ({
             ))}
           </div>
 
-          {/* Indicator Toggles */}
-          <div className="hidden sm:flex items-center space-x-1 bg-[#131722] p-0.5 rounded-md border border-[#2a2e39]">
+          {/* Desktop Indicator Toggles */}
+          <div className="hidden sm:flex items-center space-x-1 bg-[#131722] p-0.5 rounded border border-[#2a2e39]">
             <button
               onClick={() => setShowRibbon(!showRibbon)}
               className={`px-2 py-1 rounded text-[11px] font-medium transition flex items-center space-x-1 ${
@@ -719,11 +668,63 @@ export const CDCChart: React.FC<CDCChartProps> = ({
             </button>
           </div>
 
+          {/* Mobile Indicator Popover Toggle */}
+          <div className="relative sm:hidden">
+            <button
+              onClick={() => setIsMobileIndicatorOpen(!isMobileIndicatorOpen)}
+              className={`p-1.5 rounded transition border ${
+                isMobileIndicatorOpen || showRibbon || showSignalDots
+                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+                  : 'bg-[#2a2e39] text-slate-300 border-slate-700/60'
+              }`}
+              title="ตั้งค่าอินดิเคเตอร์บนมือถือ"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+            </button>
+
+            {isMobileIndicatorOpen && (
+              <div className="absolute right-0 mt-1 w-48 bg-[#1e222d] border border-[#2a2e39] rounded-xl shadow-2xl z-50 p-2 space-y-1 text-xs">
+                <button
+                  onClick={() => setShowRibbon(!showRibbon)}
+                  className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-[#2a2e39] text-slate-200"
+                >
+                  <span className="flex items-center space-x-2">
+                    <Layers className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>CDC ริบบอน</span>
+                  </span>
+                  {showRibbon && <Check className="w-3.5 h-3.5 text-cyan-400" />}
+                </button>
+
+                <button
+                  onClick={() => setShowSignalDots(!showSignalDots)}
+                  className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-[#2a2e39] text-slate-200"
+                >
+                  <span className="flex items-center space-x-2">
+                    <Zap className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>จุดซื้อ/ขาย</span>
+                  </span>
+                  {showSignalDots && <Check className="w-3.5 h-3.5 text-emerald-400" />}
+                </button>
+
+                <button
+                  onClick={() => setShowCalloutBanner(!showCalloutBanner)}
+                  className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-[#2a2e39] text-slate-200"
+                >
+                  <span className="flex items-center space-x-2">
+                    <Activity className="w-3.5 h-3.5 text-amber-400" />
+                    <span>ป้ายเตือน</span>
+                  </span>
+                  {showCalloutBanner && <Check className="w-3.5 h-3.5 text-amber-400" />}
+                </button>
+              </div>
+            )}
+          </div>
+
           {/* Fit View / Reset Zoom Button */}
           <button
             onClick={() => chartRef.current?.timeScale().fitContent()}
             className="p-1.5 bg-[#2a2e39] hover:bg-[#363c4e] text-slate-300 rounded transition border border-slate-700/60"
-            title="จัดมุมมองกราฟให้พอดี (Fit View / Reset Zoom)"
+            title="จัดมุมมองกราฟให้พอดี (Fit View)"
           >
             <Maximize2 className="w-3.5 h-3.5 text-cyan-400" />
           </button>
@@ -739,6 +740,28 @@ export const CDCChart: React.FC<CDCChartProps> = ({
           </button>
         </div>
       </div>
+
+      {/* OHLC Bar Readout (Visible on both Mobile & Desktop) */}
+      {activeDisplayCandle && (
+        <div className="bg-[#131722] px-3 py-1 border-b border-[#2a2e39] flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px] sm:text-[11px] font-mono">
+          <span className="text-slate-400">
+            O: <span className={ohlcChange.isPositive ? 'text-emerald-400' : 'text-rose-400'}>{formatCryptoPrice(activeDisplayCandle.open)}</span>
+          </span>
+          <span className="text-slate-400">
+            H: <span className="text-slate-200">{formatCryptoPrice(activeDisplayCandle.high)}</span>
+          </span>
+          <span className="text-slate-400">
+            L: <span className="text-slate-200">{formatCryptoPrice(activeDisplayCandle.low)}</span>
+          </span>
+          <span className="text-slate-400">
+            C: <span className={ohlcChange.isPositive ? 'text-emerald-400' : 'text-rose-400'}>{formatCryptoPrice(activeDisplayCandle.close)}</span>
+          </span>
+          <span className={`font-bold ml-auto ${ohlcChange.isPositive ? 'text-emerald-400' : 'text-rose-400'}`}>
+            {ohlcChange.isPositive ? '+' : ''}
+            {formatCryptoPrice(ohlcChange.diff)} ({ohlcChange.percent.toFixed(2)}%)
+          </span>
+        </div>
+      )}
 
       {/* 2. Main Chart Body with Overlay Ribbon & Callout Speech Bubble */}
       <div className="relative w-full h-[380px] sm:h-[520px] bg-[#131722] touch-pan-y">

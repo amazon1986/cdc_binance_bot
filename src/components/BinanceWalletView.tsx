@@ -431,10 +431,10 @@ export const BinanceWalletView: React.FC<BinanceWalletViewProps> = ({
               {/* 4. Category Filter & Search Bar */}
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-slate-900/60 p-3 rounded-2xl border border-slate-800">
                 {/* Category Buttons */}
-                <div className="flex items-center space-x-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                <div className="grid grid-cols-3 sm:flex sm:items-center space-x-0 sm:space-x-1 gap-1 sm:gap-0 bg-slate-950 p-1 rounded-xl border border-slate-800">
                   <button
                     onClick={() => setActiveCategory('all')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                    className={`px-3 py-2 sm:py-1.5 rounded-lg text-xs font-semibold transition text-center ${
                       activeCategory === 'all'
                         ? 'bg-slate-800 text-white'
                         : 'text-slate-400 hover:text-slate-200'
@@ -444,7 +444,7 @@ export const BinanceWalletView: React.FC<BinanceWalletViewProps> = ({
                   </button>
                   <button
                     onClick={() => setActiveCategory('spot')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                    className={`px-3 py-2 sm:py-1.5 rounded-lg text-xs font-semibold transition text-center ${
                       activeCategory === 'spot'
                         ? 'bg-slate-800 text-white'
                         : 'text-slate-400 hover:text-slate-200'
@@ -454,7 +454,7 @@ export const BinanceWalletView: React.FC<BinanceWalletViewProps> = ({
                   </button>
                   <button
                     onClick={() => setActiveCategory('futures')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                    className={`px-3 py-2 sm:py-1.5 rounded-lg text-xs font-semibold transition text-center ${
                       activeCategory === 'futures'
                         ? 'bg-slate-800 text-white'
                         : 'text-slate-400 hover:text-slate-200'
@@ -465,7 +465,7 @@ export const BinanceWalletView: React.FC<BinanceWalletViewProps> = ({
                 </div>
 
                 {/* Search & Hide Small Balances Toggle */}
-                <div className="flex flex-wrap items-center gap-3">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
                   <label className="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer select-none">
                     <input
                       type="checkbox"
@@ -476,23 +476,23 @@ export const BinanceWalletView: React.FC<BinanceWalletViewProps> = ({
                     <span>ซ่อนเหรียญมูลค่าน้อย (&lt; $1.00)</span>
                   </label>
 
-                  <div className="relative">
+                  <div className="relative w-full sm:w-auto">
                     <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
                       type="text"
                       placeholder="ค้นหาเหรียญ..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      className="bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition w-36 sm:w-48"
+                      className="bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-3 py-2 sm:py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition w-full sm:w-48"
                     />
                   </div>
                 </div>
               </div>
 
-              {/* 5. Spot Balances Table */}
+              {/* 5. Spot Balances Table & Mobile Cards */}
               {(activeCategory === 'all' || activeCategory === 'spot') && (
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-                  <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+                  <div className="px-4 sm:px-5 py-3.5 sm:py-4 border-b border-slate-800 flex items-center justify-between">
                     <div className="flex items-center space-x-2">
                       <Wallet className="w-4 h-4 text-cyan-400" />
                       <h3 className="text-sm font-bold text-white">รายการสินทรัพย์ในกระเป๋า Spot (Spot Balances)</h3>
@@ -505,130 +505,208 @@ export const BinanceWalletView: React.FC<BinanceWalletViewProps> = ({
                       {searchQuery ? `ไม่พบเหรียญที่ตรงกับคำค้นหา "${searchQuery}"` : 'ไม่มียอดคงเหลือในกระเป๋า Spot'}
                     </div>
                   ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-xs">
-                        <thead className="bg-slate-950/80 text-slate-400 uppercase text-[11px] font-semibold border-b border-slate-800/80">
-                          <tr>
-                            <th className="py-3 px-4">เหรียญ (Asset)</th>
-                            <th className="py-3 px-4 text-right">ยอดคงเหลือ (Total)</th>
-                            <th className="py-3 px-4 text-right">พร้อมใช้ (Free)</th>
-                            <th className="py-3 px-4 text-right">อยู่ในคำสั่ง (Locked)</th>
-                            <th className="py-3 px-4 text-right">ราคาตลาด ($)</th>
-                            <th className="py-3 px-4 text-right">มูลค่ารวม ($ USD)</th>
-                            <th className="py-3 px-4 text-right">สัดส่วน (%)</th>
-                            <th className="py-3 px-4 text-right">24h Change</th>
-                            <th className="py-3 px-4 text-center">แอ็กชัน</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-800/60 font-mono">
-                          {filteredSpotBalances.map((item) => {
-                            const pairSymbol = `${item.asset}USDT`;
-                            const isPositive = (item.priceChange24h || 0) >= 0;
+                    <>
+                      {/* Mobile Card List (md:hidden) */}
+                      <div className="divide-y divide-slate-800/80 md:hidden">
+                        {filteredSpotBalances.map((item) => {
+                          const pairSymbol = `${item.asset}USDT`;
+                          const isPositive = (item.priceChange24h || 0) >= 0;
 
-                            return (
-                              <tr
-                                key={item.asset}
-                                className="hover:bg-slate-800/40 transition group"
-                              >
-                                {/* Asset Name & Icon */}
-                                <td className="py-3.5 px-4">
-                                  <div className="flex items-center space-x-2.5">
-                                    <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-white text-xs group-hover:border-emerald-500/50 transition">
-                                      {item.asset.slice(0, 3)}
+                          return (
+                            <div key={item.asset} className="p-4 space-y-3 hover:bg-slate-800/30 transition">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center space-x-2.5">
+                                  <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-white text-xs">
+                                    {item.asset.slice(0, 3)}
+                                  </div>
+                                  <div>
+                                    <div className="font-bold text-white flex items-center space-x-1.5">
+                                      <span>{item.asset}</span>
+                                      {item.usdValue >= 100 && (
+                                        <span className="text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded font-sans">
+                                          Major
+                                        </span>
+                                      )}
                                     </div>
-                                    <div>
-                                      <div className="font-bold text-white flex items-center space-x-1.5">
-                                        <span>{item.asset}</span>
-                                        {item.usdValue >= 100 && (
-                                          <span className="text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.2 rounded font-sans">
-                                            Major
-                                          </span>
-                                        )}
+                                    <div className="text-[11px] text-slate-400 font-mono">
+                                      {item.percentOfPortfolio ? `${item.percentOfPortfolio.toFixed(1)}% ของพอร์ต` : ''}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="text-right">
+                                  <div className="text-base font-bold font-mono text-emerald-400">
+                                    ${maskValue(item.usdValue)}
+                                  </div>
+                                  {item.priceChange24h !== undefined && (
+                                    <div className={`text-[11px] font-bold font-mono ${isPositive ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                      {isPositive ? `+${item.priceChange24h.toFixed(2)}%` : `${item.priceChange24h.toFixed(2)}%`}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-2 bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/60 text-xs font-mono">
+                                <div>
+                                  <span className="text-[10px] text-slate-400 font-sans block">ยอดทั้งหมด (Total)</span>
+                                  <span className="text-slate-100 font-bold">{isBalanceHidden ? '••••••' : formatCryptoAmount(item.total)}</span>
+                                </div>
+                                <div>
+                                  <span className="text-[10px] text-slate-400 font-sans block">พร้อมใช้ (Free)</span>
+                                  <span className="text-slate-300">{isBalanceHidden ? '••••••' : formatCryptoAmount(item.free)}</span>
+                                </div>
+                                <div>
+                                  <span className="text-[10px] text-slate-400 font-sans block">ราคาตลาด ($)</span>
+                                  <span className="text-slate-300">{item.usdPrice > 0 ? formatCryptoPrice(item.usdPrice) : '-'}</span>
+                                </div>
+                                <div>
+                                  <span className="text-[10px] text-slate-400 font-sans block">อยู่ในคำสั่ง (Locked)</span>
+                                  <span className={item.locked > 0 ? 'text-amber-400' : 'text-slate-500'}>
+                                    {item.locked > 0 ? (isBalanceHidden ? '••••••' : formatCryptoAmount(item.locked)) : '0'}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {item.asset !== 'USDT' && onSelectSymbol && (
+                                <button
+                                  onClick={() => onSelectSymbol(pairSymbol)}
+                                  className="w-full py-2 bg-slate-800 hover:bg-emerald-600 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 transition flex items-center justify-center space-x-1.5 active:scale-[0.98]"
+                                >
+                                  <span>ดูกราฟ CDC {pairSymbol}</span>
+                                  <ArrowUpRight className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Desktop Table View (hidden md:block) */}
+                      <div className="hidden md:block overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-950/80 text-slate-400 uppercase text-[11px] font-semibold border-b border-slate-800/80">
+                            <tr>
+                              <th className="py-3 px-4">เหรียญ (Asset)</th>
+                              <th className="py-3 px-4 text-right">ยอดคงเหลือ (Total)</th>
+                              <th className="py-3 px-4 text-right">พร้อมใช้ (Free)</th>
+                              <th className="py-3 px-4 text-right">อยู่ในคำสั่ง (Locked)</th>
+                              <th className="py-3 px-4 text-right">ราคาตลาด ($)</th>
+                              <th className="py-3 px-4 text-right">มูลค่ารวม ($ USD)</th>
+                              <th className="py-3 px-4 text-right">สัดส่วน (%)</th>
+                              <th className="py-3 px-4 text-right">24h Change</th>
+                              <th className="py-3 px-4 text-center">แอ็กชัน</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800/60 font-mono">
+                            {filteredSpotBalances.map((item) => {
+                              const pairSymbol = `${item.asset}USDT`;
+                              const isPositive = (item.priceChange24h || 0) >= 0;
+
+                              return (
+                                <tr
+                                  key={item.asset}
+                                  className="hover:bg-slate-800/40 transition group"
+                                >
+                                  {/* Asset Name & Icon */}
+                                  <td className="py-3.5 px-4">
+                                    <div className="flex items-center space-x-2.5">
+                                      <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center font-bold text-white text-xs group-hover:border-emerald-500/50 transition">
+                                        {item.asset.slice(0, 3)}
+                                      </div>
+                                      <div>
+                                        <div className="font-bold text-white flex items-center space-x-1.5">
+                                          <span>{item.asset}</span>
+                                          {item.usdValue >= 100 && (
+                                            <span className="text-[9px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.2 rounded font-sans">
+                                              Major
+                                            </span>
+                                          )}
+                                        </div>
                                       </div>
                                     </div>
-                                  </div>
-                                </td>
+                                  </td>
 
-                                {/* Total Amount */}
-                                <td className="py-3.5 px-4 text-right font-bold text-slate-100">
-                                  {isBalanceHidden ? '••••••' : formatCryptoAmount(item.total)}
-                                </td>
+                                  {/* Total Amount */}
+                                  <td className="py-3.5 px-4 text-right font-bold text-slate-100">
+                                    {isBalanceHidden ? '••••••' : formatCryptoAmount(item.total)}
+                                  </td>
 
-                                {/* Free Amount */}
-                                <td className="py-3.5 px-4 text-right text-slate-300">
-                                  {isBalanceHidden ? '••••••' : formatCryptoAmount(item.free)}
-                                </td>
+                                  {/* Free Amount */}
+                                  <td className="py-3.5 px-4 text-right text-slate-300">
+                                    {isBalanceHidden ? '••••••' : formatCryptoAmount(item.free)}
+                                  </td>
 
-                                {/* Locked Amount */}
-                                <td className="py-3.5 px-4 text-right text-slate-400">
-                                  {item.locked > 0 ? (
-                                    <span className="text-amber-400">
-                                      {isBalanceHidden ? '••••••' : formatCryptoAmount(item.locked)}
-                                    </span>
-                                  ) : (
-                                    <span className="text-slate-600">0</span>
-                                  )}
-                                </td>
+                                  {/* Locked Amount */}
+                                  <td className="py-3.5 px-4 text-right text-slate-400">
+                                    {item.locked > 0 ? (
+                                      <span className="text-amber-400">
+                                        {isBalanceHidden ? '••••••' : formatCryptoAmount(item.locked)}
+                                      </span>
+                                    ) : (
+                                      <span className="text-slate-600">0</span>
+                                    )}
+                                  </td>
 
-                                {/* Current USD Price */}
-                                <td className="py-3.5 px-4 text-right text-slate-300">
-                                  {item.usdPrice > 0 ? formatCryptoPrice(item.usdPrice) : '-'}
-                                </td>
+                                  {/* Current USD Price */}
+                                  <td className="py-3.5 px-4 text-right text-slate-300">
+                                    {item.usdPrice > 0 ? formatCryptoPrice(item.usdPrice) : '-'}
+                                  </td>
 
-                                {/* Total USD Value */}
-                                <td className="py-3.5 px-4 text-right font-bold text-emerald-400">
-                                  ${maskValue(item.usdValue)}
-                                </td>
+                                  {/* Total USD Value */}
+                                  <td className="py-3.5 px-4 text-right font-bold text-emerald-400">
+                                    ${maskValue(item.usdValue)}
+                                  </td>
 
-                                {/* Percent of Portfolio */}
-                                <td className="py-3.5 px-4 text-right text-slate-300 font-sans">
-                                  <div className="inline-flex items-center space-x-1">
-                                    <span className="font-mono">{item.percentOfPortfolio?.toFixed(1)}%</span>
-                                  </div>
-                                </td>
+                                  {/* Percent of Portfolio */}
+                                  <td className="py-3.5 px-4 text-right text-slate-300 font-sans">
+                                    <div className="inline-flex items-center space-x-1">
+                                      <span className="font-mono">{item.percentOfPortfolio?.toFixed(1)}%</span>
+                                    </div>
+                                  </td>
 
-                                {/* 24h Change */}
-                                <td className="py-3.5 px-4 text-right">
-                                  {item.priceChange24h !== undefined ? (
-                                    <span
-                                      className={`font-bold ${
-                                        isPositive ? 'text-emerald-400' : 'text-rose-400'
-                                      }`}
-                                    >
-                                      {isPositive ? `+${item.priceChange24h.toFixed(2)}%` : `${item.priceChange24h.toFixed(2)}%`}
-                                    </span>
-                                  ) : (
-                                    <span className="text-slate-600">-</span>
-                                  )}
-                                </td>
+                                  {/* 24h Change */}
+                                  <td className="py-3.5 px-4 text-right">
+                                    {item.priceChange24h !== undefined ? (
+                                      <span
+                                        className={`font-bold ${
+                                          isPositive ? 'text-emerald-400' : 'text-rose-400'
+                                        }`}
+                                      >
+                                        {isPositive ? `+${item.priceChange24h.toFixed(2)}%` : `${item.priceChange24h.toFixed(2)}%`}
+                                      </span>
+                                    ) : (
+                                      <span className="text-slate-600">-</span>
+                                    )}
+                                  </td>
 
-                                {/* Action Buttons */}
-                                <td className="py-3.5 px-4 text-center">
-                                  {item.asset !== 'USDT' && onSelectSymbol && (
-                                    <button
-                                      onClick={() => onSelectSymbol(pairSymbol)}
-                                      className="px-2.5 py-1 bg-slate-800 hover:bg-emerald-600 hover:text-white text-slate-300 rounded-lg text-[11px] font-semibold border border-slate-700 transition flex items-center space-x-1 mx-auto"
-                                      title={`ดูกราฟ ${pairSymbol}`}
-                                    >
-                                      <span>ดูกราฟ CDC</span>
-                                      <ArrowUpRight className="w-3 h-3" />
-                                    </button>
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
+                                  {/* Action Buttons */}
+                                  <td className="py-3.5 px-4 text-center">
+                                    {item.asset !== 'USDT' && onSelectSymbol && (
+                                      <button
+                                        onClick={() => onSelectSymbol(pairSymbol)}
+                                        className="px-2.5 py-1 bg-slate-800 hover:bg-emerald-600 hover:text-white text-slate-300 rounded-lg text-[11px] font-semibold border border-slate-700 transition flex items-center space-x-1 mx-auto"
+                                        title={`ดูกราฟ ${pairSymbol}`}
+                                      >
+                                        <span>ดูกราฟ CDC</span>
+                                        <ArrowUpRight className="w-3 h-3" />
+                                      </button>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
                   )}
                 </div>
               )}
 
-              {/* 6. Futures Active Positions Table */}
+              {/* 6. Futures Active Positions Table & Mobile Cards */}
               {(activeCategory === 'all' || activeCategory === 'futures') && (
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-                  <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+                  <div className="px-4 sm:px-5 py-3.5 sm:py-4 border-b border-slate-800 flex items-center justify-between">
                     <div className="flex items-center space-x-2">
                       <Zap className="w-4 h-4 text-amber-400" />
                       <h3 className="text-sm font-bold text-white">สัญญาที่เปิดอยู่ใน Binance Futures (Open Positions)</h3>
@@ -641,105 +719,182 @@ export const BinanceWalletView: React.FC<BinanceWalletViewProps> = ({
                       ไม่มีสัญญาที่เปิดอยู่ใน Binance Futures
                     </div>
                   ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-xs">
-                        <thead className="bg-slate-950/80 text-slate-400 uppercase text-[11px] font-semibold border-b border-slate-800/80">
-                          <tr>
-                            <th className="py-3 px-4">เหรียญ & ฝั่ง</th>
-                            <th className="py-3 px-4 text-right">Leverage</th>
-                            <th className="py-3 px-4 text-right">ขนาดสัญญา (Amt)</th>
-                            <th className="py-3 px-4 text-right">ราคาเข้า (Entry)</th>
-                            <th className="py-3 px-4 text-right">ราคาปัจจุบัน (Mark)</th>
-                            <th className="py-3 px-4 text-right">ราคา Liquidation</th>
-                            <th className="py-3 px-4 text-right">หลักประกัน (Margin)</th>
-                            <th className="py-3 px-4 text-right">Unrealized PnL ($)</th>
-                            <th className="py-3 px-4 text-right">PnL (%)</th>
-                            <th className="py-3 px-4 text-center">แอ็กชัน</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-800/60 font-mono">
-                          {walletData.futuresPositions.map((pos) => {
-                            const isLong = pos.positionAmt > 0 || pos.positionSide === 'LONG';
-                            const isWin = pos.unrealizedProfit >= 0;
+                    <>
+                      {/* Mobile Card List (md:hidden) */}
+                      <div className="divide-y divide-slate-800/80 md:hidden">
+                        {walletData.futuresPositions.map((pos) => {
+                          const isLong = pos.positionAmt > 0 || pos.positionSide === 'LONG';
+                          const isWin = pos.unrealizedProfit >= 0;
 
-                            return (
-                              <tr
-                                key={pos.symbol}
-                                className="hover:bg-slate-800/40 transition"
-                              >
-                                {/* Symbol & Side Badge */}
-                                <td className="py-3.5 px-4 font-sans">
-                                  <div className="flex items-center space-x-2">
-                                    <span className="font-bold text-white font-mono">{pos.symbol}</span>
-                                    <span
-                                      className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                        isLong
-                                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                                          : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                                      }`}
-                                    >
-                                      {isLong ? 'LONG' : 'SHORT'}
-                                    </span>
+                          return (
+                            <div key={pos.symbol} className="p-4 space-y-3 hover:bg-slate-800/30 transition">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center space-x-2">
+                                  <span className="font-bold text-white font-mono text-sm">{pos.symbol}</span>
+                                  <span
+                                    className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                      isLong
+                                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                        : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                                    }`}
+                                  >
+                                    {isLong ? 'LONG' : 'SHORT'}
+                                  </span>
+                                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono">
+                                    {pos.leverage}x
+                                  </span>
+                                </div>
+
+                                <div className="text-right">
+                                  <div className={`text-base font-bold font-mono ${isWin ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                    {isWin ? '+' : ''}${maskValue(pos.unrealizedProfit)}
                                   </div>
-                                </td>
+                                  <div className={`text-[11px] font-bold font-mono ${isWin ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                    {isWin ? '+' : ''}{(pos.pnlPercent || 0).toFixed(2)}%
+                                  </div>
+                                </div>
+                              </div>
 
-                                {/* Leverage */}
-                                <td className="py-3.5 px-4 text-right font-bold text-amber-400">
-                                  {pos.leverage}x
-                                </td>
+                              <div className="grid grid-cols-2 gap-2 bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/60 text-xs font-mono">
+                                <div>
+                                  <span className="text-[10px] text-slate-400 font-sans block">ขนาดสัญญา (Amt)</span>
+                                  <span className="text-slate-100">{formatCryptoAmount(Math.abs(pos.positionAmt))}</span>
+                                </div>
+                                <div>
+                                  <span className="text-[10px] text-slate-400 font-sans block">หลักประกัน (Margin)</span>
+                                  <span className="text-slate-200">${maskValue(pos.initialMargin)}</span>
+                                </div>
+                                <div>
+                                  <span className="text-[10px] text-slate-400 font-sans block">ราคาเข้า (Entry)</span>
+                                  <span className="text-slate-300">{formatCryptoPrice(pos.entryPrice)}</span>
+                                </div>
+                                <div>
+                                  <span className="text-[10px] text-slate-400 font-sans block">ราคาปัจจุบัน (Mark)</span>
+                                  <span className="text-slate-100 font-bold">{formatCryptoPrice(pos.markPrice)}</span>
+                                </div>
+                                {pos.liquidationPrice && (
+                                  <div className="col-span-2 flex items-center justify-between pt-1 border-t border-slate-800/60">
+                                    <span className="text-[10px] text-rose-400/90 font-sans">ราคา Liquidation:</span>
+                                    <span className="text-rose-400 font-bold">{formatCryptoPrice(pos.liquidationPrice)}</span>
+                                  </div>
+                                )}
+                              </div>
 
-                                {/* Position Size */}
-                                <td className="py-3.5 px-4 text-right text-slate-100">
-                                  {formatCryptoAmount(Math.abs(pos.positionAmt))}
-                                </td>
+                              {onSelectSymbol && (
+                                <button
+                                  onClick={() => onSelectSymbol(pos.symbol)}
+                                  className="w-full py-2 bg-slate-800 hover:bg-emerald-600 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 transition flex items-center justify-center space-x-1.5 active:scale-[0.98]"
+                                >
+                                  <span>ดูกราฟ CDC {pos.symbol}</span>
+                                  <ArrowUpRight className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
 
-                                {/* Entry Price */}
-                                <td className="py-3.5 px-4 text-right text-slate-300">
-                                  {formatCryptoPrice(pos.entryPrice)}
-                                </td>
+                      {/* Desktop Table View (hidden md:block) */}
+                      <div className="hidden md:block overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-950/80 text-slate-400 uppercase text-[11px] font-semibold border-b border-slate-800/80">
+                            <tr>
+                              <th className="py-3 px-4">เหรียญ & ฝั่ง</th>
+                              <th className="py-3 px-4 text-right">Leverage</th>
+                              <th className="py-3 px-4 text-right">ขนาดสัญญา (Amt)</th>
+                              <th className="py-3 px-4 text-right">ราคาเข้า (Entry)</th>
+                              <th className="py-3 px-4 text-right">ราคาปัจจุบัน (Mark)</th>
+                              <th className="py-3 px-4 text-right">ราคา Liquidation</th>
+                              <th className="py-3 px-4 text-right">หลักประกัน (Margin)</th>
+                              <th className="py-3 px-4 text-right">Unrealized PnL ($)</th>
+                              <th className="py-3 px-4 text-right">PnL (%)</th>
+                              <th className="py-3 px-4 text-center">แอ็กชัน</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800/60 font-mono">
+                            {walletData.futuresPositions.map((pos) => {
+                              const isLong = pos.positionAmt > 0 || pos.positionSide === 'LONG';
+                              const isWin = pos.unrealizedProfit >= 0;
 
-                                {/* Mark Price */}
-                                <td className="py-3.5 px-4 text-right text-slate-100 font-bold">
-                                  {formatCryptoPrice(pos.markPrice)}
-                                </td>
+                              return (
+                                <tr
+                                  key={pos.symbol}
+                                  className="hover:bg-slate-800/40 transition"
+                                >
+                                  {/* Symbol & Side Badge */}
+                                  <td className="py-3.5 px-4 font-sans">
+                                    <div className="flex items-center space-x-2">
+                                      <span className="font-bold text-white font-mono">{pos.symbol}</span>
+                                      <span
+                                        className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                          isLong
+                                            ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                            : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                                        }`}
+                                      >
+                                        {isLong ? 'LONG' : 'SHORT'}
+                                      </span>
+                                    </div>
+                                  </td>
 
-                                {/* Liquidation Price */}
-                                <td className="py-3.5 px-4 text-right text-rose-400/90 font-medium">
-                                  {pos.liquidationPrice ? formatCryptoPrice(pos.liquidationPrice) : '-'}
-                                </td>
+                                  {/* Leverage */}
+                                  <td className="py-3.5 px-4 text-right font-bold text-amber-400">
+                                    {pos.leverage}x
+                                  </td>
 
-                                {/* Margin */}
-                                <td className="py-3.5 px-4 text-right text-slate-200">
-                                  ${maskValue(pos.initialMargin)}
-                                </td>
+                                  {/* Position Size */}
+                                  <td className="py-3.5 px-4 text-right text-slate-100">
+                                    {formatCryptoAmount(Math.abs(pos.positionAmt))}
+                                  </td>
 
-                                {/* Unrealized PnL USDT */}
-                                <td className={`py-3.5 px-4 text-right font-bold ${isWin ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                  {isWin ? '+' : ''}${maskValue(pos.unrealizedProfit)}
-                                </td>
+                                  {/* Entry Price */}
+                                  <td className="py-3.5 px-4 text-right text-slate-300">
+                                    {formatCryptoPrice(pos.entryPrice)}
+                                  </td>
 
-                                {/* PnL Percent */}
-                                <td className={`py-3.5 px-4 text-right font-bold ${isWin ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                  {isWin ? '+' : ''}{(pos.pnlPercent || 0).toFixed(2)}%
-                                </td>
+                                  {/* Mark Price */}
+                                  <td className="py-3.5 px-4 text-right text-slate-100 font-bold">
+                                    {formatCryptoPrice(pos.markPrice)}
+                                  </td>
 
-                                {/* Action */}
-                                <td className="py-3.5 px-4 text-center">
-                                  {onSelectSymbol && (
-                                    <button
-                                      onClick={() => onSelectSymbol(pos.symbol)}
-                                      className="px-2.5 py-1 bg-slate-800 hover:bg-emerald-600 hover:text-white text-slate-300 rounded-lg text-[11px] font-semibold border border-slate-700 transition"
-                                    >
-                                      ดูกราฟ
-                                    </button>
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
+                                  {/* Liquidation Price */}
+                                  <td className="py-3.5 px-4 text-right text-rose-400/90 font-medium">
+                                    {pos.liquidationPrice ? formatCryptoPrice(pos.liquidationPrice) : '-'}
+                                  </td>
+
+                                  {/* Margin */}
+                                  <td className="py-3.5 px-4 text-right text-slate-200">
+                                    ${maskValue(pos.initialMargin)}
+                                  </td>
+
+                                  {/* Unrealized PnL USDT */}
+                                  <td className={`py-3.5 px-4 text-right font-bold ${isWin ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                    {isWin ? '+' : ''}${maskValue(pos.unrealizedProfit)}
+                                  </td>
+
+                                  {/* PnL Percent */}
+                                  <td className={`py-3.5 px-4 text-right font-bold ${isWin ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                    {isWin ? '+' : ''}{(pos.pnlPercent || 0).toFixed(2)}%
+                                  </td>
+
+                                  {/* Action */}
+                                  <td className="py-3.5 px-4 text-center">
+                                    {onSelectSymbol && (
+                                      <button
+                                        onClick={() => onSelectSymbol(pos.symbol)}
+                                        className="px-2.5 py-1 bg-slate-800 hover:bg-emerald-600 hover:text-white text-slate-300 rounded-lg text-[11px] font-semibold border border-slate-700 transition"
+                                      >
+                                        ดูกราฟ
+                                      </button>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
                   )}
                 </div>
               )}
@@ -824,9 +979,9 @@ export const BinanceWalletView: React.FC<BinanceWalletViewProps> = ({
             </div>
           </div>
 
-          {/* Paper Active Positions Table */}
+          {/* Paper Active Positions Table & Mobile Cards */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
-            <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+            <div className="px-4 sm:px-5 py-3.5 sm:py-4 border-b border-slate-800 flex items-center justify-between">
               <div className="flex items-center space-x-2">
                 <Layers className="w-4 h-4 text-emerald-400" />
                 <h3 className="text-sm font-bold text-white">สัญญาที่เปิดอยู่ในพอร์ตจำลอง (Active Paper Positions)</h3>
@@ -839,91 +994,169 @@ export const BinanceWalletView: React.FC<BinanceWalletViewProps> = ({
                 ขณะนี้ไม่มีสัญญาที่เปิดอยู่ในพอร์ตจำลอง
               </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-950/80 text-slate-400 uppercase text-[11px] font-semibold border-b border-slate-800/80">
-                    <tr>
-                      <th className="py-3 px-4">เหรียญ & ฝั่ง</th>
-                      <th className="py-3 px-4 text-right">Leverage</th>
-                      <th className="py-3 px-4 text-right">เงินทุน (Margin)</th>
-                      <th className="py-3 px-4 text-right">ราคาเข้า (Entry)</th>
-                      <th className="py-3 px-4 text-right">ราคา Liquidation</th>
-                      <th className="py-3 px-4 text-right">Unrealized PnL ($)</th>
-                      <th className="py-3 px-4 text-right">PnL (%)</th>
-                      <th className="py-3 px-4 text-center">แอ็กชัน</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/60 font-mono">
-                    {paperAccount.activePositions.map((pos) => {
-                      const isWin = (pos.currentPnlUsdt || 0) >= 0;
+              <>
+                {/* Mobile Card List (md:hidden) */}
+                <div className="divide-y divide-slate-800/80 md:hidden">
+                  {paperAccount.activePositions.map((pos) => {
+                    const isWin = (pos.currentPnlUsdt || 0) >= 0;
 
-                      return (
-                        <tr key={pos.symbol} className="hover:bg-slate-800/40 transition">
-                          <td className="py-3.5 px-4 font-sans">
-                            <div className="flex items-center space-x-2">
-                              <span className="font-bold text-white font-mono">{pos.symbol}</span>
-                              <span
-                                className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                  pos.side === 'LONG'
-                                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                                    : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                                }`}
-                              >
-                                {pos.side}
-                              </span>
+                    return (
+                      <div key={pos.symbol} className="p-4 space-y-3 hover:bg-slate-800/30 transition">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center space-x-2">
+                            <span className="font-bold text-white font-mono text-sm">{pos.symbol}</span>
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                pos.side === 'LONG'
+                                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                  : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                              }`}
+                            >
+                              {pos.side}
+                            </span>
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono">
+                              {pos.leverage || 1}x
+                            </span>
+                          </div>
+
+                          <div className="text-right">
+                            <div className={`text-base font-bold font-mono ${isWin ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {isWin ? '+' : ''}${maskValue(pos.currentPnlUsdt || 0)}
                             </div>
-                          </td>
-
-                          <td className="py-3.5 px-4 text-right font-bold text-amber-400">
-                            {pos.leverage || 1}x
-                          </td>
-
-                          <td className="py-3.5 px-4 text-right text-slate-100">
-                            ${maskValue(pos.usdtInvested)}
-                          </td>
-
-                          <td className="py-3.5 px-4 text-right text-slate-300">
-                            {formatCryptoPrice(pos.entryPrice)}
-                          </td>
-
-                          <td className="py-3.5 px-4 text-right text-rose-400 font-medium">
-                            {pos.liquidationPrice ? formatCryptoPrice(pos.liquidationPrice) : '-'}
-                          </td>
-
-                          <td className={`py-3.5 px-4 text-right font-bold ${isWin ? 'text-emerald-400' : 'text-rose-400'}`}>
-                            {isWin ? '+' : ''}${maskValue(pos.currentPnlUsdt || 0)}
-                          </td>
-
-                          <td className={`py-3.5 px-4 text-right font-bold ${isWin ? 'text-emerald-400' : 'text-rose-400'}`}>
-                            {isWin ? '+' : ''}{(pos.currentPnlPercent || 0).toFixed(2)}%
-                          </td>
-
-                          <td className="py-3.5 px-4 text-center">
-                            <div className="flex items-center justify-center space-x-1.5">
-                              {onSelectSymbol && (
-                                <button
-                                  onClick={() => onSelectSymbol(pos.symbol)}
-                                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[11px] font-semibold border border-slate-700 transition"
-                                >
-                                  ดูกราฟ
-                                </button>
-                              )}
-                              {onClosePaperPosition && (
-                                <button
-                                  onClick={() => onClosePaperPosition(pos.symbol)}
-                                  className="px-2.5 py-1 bg-rose-600/20 hover:bg-rose-600 text-rose-400 hover:text-white rounded-lg text-[11px] font-semibold border border-rose-500/30 transition"
-                                >
-                                  ปิดสัญญา
-                                </button>
-                              )}
+                            <div className={`text-[11px] font-bold font-mono ${isWin ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {isWin ? '+' : ''}{(pos.currentPnlPercent || 0).toFixed(2)}%
                             </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/60 text-xs font-mono">
+                          <div>
+                            <span className="text-[10px] text-slate-400 font-sans block">เงินทุน (Margin)</span>
+                            <span className="text-slate-100 font-bold">${maskValue(pos.usdtInvested)}</span>
+                          </div>
+                          <div>
+                            <span className="text-[10px] text-slate-400 font-sans block">ราคาเข้า (Entry)</span>
+                            <span className="text-slate-300">{formatCryptoPrice(pos.entryPrice)}</span>
+                          </div>
+                          {pos.liquidationPrice && (
+                            <div className="col-span-2 flex items-center justify-between pt-1 border-t border-slate-800/60">
+                              <span className="text-[10px] text-rose-400/90 font-sans">ราคา Liquidation:</span>
+                              <span className="text-rose-400 font-bold">{formatCryptoPrice(pos.liquidationPrice)}</span>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          {onSelectSymbol && (
+                            <button
+                              onClick={() => onSelectSymbol(pos.symbol)}
+                              className="py-2.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold border border-slate-700 transition flex items-center justify-center space-x-1 active:scale-[0.98]"
+                            >
+                              <span>ดูกราฟ</span>
+                              <ArrowUpRight className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          {onClosePaperPosition && (
+                            <button
+                              onClick={() => onClosePaperPosition(pos.symbol)}
+                              className="py-2.5 px-3 bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white rounded-xl text-xs font-bold border border-rose-500/30 transition shadow-sm active:scale-[0.98]"
+                            >
+                              ปิดสัญญา
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Desktop Table View (hidden md:block) */}
+                <div className="hidden md:block overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-950/80 text-slate-400 uppercase text-[11px] font-semibold border-b border-slate-800/80">
+                      <tr>
+                        <th className="py-3 px-4">เหรียญ & ฝั่ง</th>
+                        <th className="py-3 px-4 text-right">Leverage</th>
+                        <th className="py-3 px-4 text-right">เงินทุน (Margin)</th>
+                        <th className="py-3 px-4 text-right">ราคาเข้า (Entry)</th>
+                        <th className="py-3 px-4 text-right">ราคา Liquidation</th>
+                        <th className="py-3 px-4 text-right">Unrealized PnL ($)</th>
+                        <th className="py-3 px-4 text-right">PnL (%)</th>
+                        <th className="py-3 px-4 text-center">แอ็กชัน</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 font-mono">
+                      {paperAccount.activePositions.map((pos) => {
+                        const isWin = (pos.currentPnlUsdt || 0) >= 0;
+
+                        return (
+                          <tr key={pos.symbol} className="hover:bg-slate-800/40 transition">
+                            <td className="py-3.5 px-4 font-sans">
+                              <div className="flex items-center space-x-2">
+                                <span className="font-bold text-white font-mono">{pos.symbol}</span>
+                                <span
+                                  className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                    pos.side === 'LONG'
+                                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                      : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                                  }`}
+                                >
+                                  {pos.side}
+                                </span>
+                              </div>
+                            </td>
+
+                            <td className="py-3.5 px-4 text-right font-bold text-amber-400">
+                              {pos.leverage || 1}x
+                            </td>
+
+                            <td className="py-3.5 px-4 text-right text-slate-100">
+                              ${maskValue(pos.usdtInvested)}
+                            </td>
+
+                            <td className="py-3.5 px-4 text-right text-slate-300">
+                              {formatCryptoPrice(pos.entryPrice)}
+                            </td>
+
+                            <td className="py-3.5 px-4 text-right text-rose-400 font-medium">
+                              {pos.liquidationPrice ? formatCryptoPrice(pos.liquidationPrice) : '-'}
+                            </td>
+
+                            <td className={`py-3.5 px-4 text-right font-bold ${isWin ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {isWin ? '+' : ''}${maskValue(pos.currentPnlUsdt || 0)}
+                            </td>
+
+                            <td className={`py-3.5 px-4 text-right font-bold ${isWin ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {isWin ? '+' : ''}{(pos.currentPnlPercent || 0).toFixed(2)}%
+                            </td>
+
+                            <td className="py-3.5 px-4 text-center">
+                              <div className="flex items-center justify-center space-x-1.5">
+                                {onSelectSymbol && (
+                                  <button
+                                    onClick={() => onSelectSymbol(pos.symbol)}
+                                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[11px] font-semibold border border-slate-700 transition"
+                                  >
+                                    ดูกราฟ
+                                  </button>
+                                )}
+                                {onClosePaperPosition && (
+                                  <button
+                                    onClick={() => onClosePaperPosition(pos.symbol)}
+                                    className="px-2.5 py-1 bg-rose-600/20 hover:bg-rose-600 text-rose-400 hover:text-white rounded-lg text-[11px] font-semibold border border-rose-500/30 transition"
+                                  >
+                                    ปิดสัญญา
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )}
           </div>
         </div>

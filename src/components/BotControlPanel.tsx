@@ -23,6 +23,8 @@ import {
   Plus,
   X,
   Search,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 
 const ALL_BINANCE_USDT_PAIRS = [
@@ -86,6 +88,7 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
   const [watchlistSearchInput, setWatchlistSearchInput] = useState<string>('');
   const [isSearchDropdownOpen, setIsSearchDropdownOpen] = useState<boolean>(false);
   const [watchlistToast, setWatchlistToast] = useState<{ msg: string; type: 'success' | 'warning' } | null>(null);
+  const [isConsoleExpanded, setIsConsoleExpanded] = useState(false);
 
   React.useEffect(() => {
     if (!isEditing) {
@@ -185,7 +188,7 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
               }`}
             >
               {botConfig.isActive
-                ? `🟢 Bot Auto (${botConfig.scanMode === 'WATCHLIST' ? 'สแกน Watchlist' : botConfig.scanMode === 'MULTI_SCAN' ? 'สแกนทั้งตลาด' : botConfig.symbol})`
+                ? `🟢 Bot Auto (${(botConfig.scanMode ?? 'WATCHLIST') === 'WATCHLIST' ? 'สแกน Watchlist' : botConfig.scanMode === 'MULTI_SCAN' ? 'สแกนทั้งตลาด' : botConfig.symbol})`
                 : '🔴 Bot ปิดการทำงาน'}
             </span>
           </div>
@@ -230,7 +233,7 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
                   setConfigForm(updated);
                 }}
                 className={`p-4 rounded-xl border text-left transition flex flex-col justify-between space-y-2 cursor-pointer ${
-                  (botConfig.scanMode ?? 'SINGLE') === 'SINGLE'
+                  botConfig.scanMode === 'SINGLE'
                     ? 'bg-slate-900 border-emerald-500/60 text-white font-bold ring-1 ring-emerald-500/30 shadow-lg'
                     : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:border-slate-700 hover:bg-slate-900'
                 }`}
@@ -240,7 +243,7 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
                     <span>🎯</span>
                     <span>เล่นเฉพาะเหรียญปัจจุบัน</span>
                   </span>
-                  {(botConfig.scanMode ?? 'SINGLE') === 'SINGLE' && (
+                  {botConfig.scanMode === 'SINGLE' && (
                     <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 px-2 py-0.5 rounded-full font-bold">
                       ใช้งานอยู่
                     </span>
@@ -260,7 +263,7 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
                   setConfigForm(updated);
                 }}
                 className={`p-4 rounded-xl border text-left transition flex flex-col justify-between space-y-2 cursor-pointer ${
-                  botConfig.scanMode === 'WATCHLIST'
+                  (botConfig.scanMode ?? 'WATCHLIST') === 'WATCHLIST'
                     ? 'bg-[#181308] border-amber-500/70 text-white font-bold ring-1 ring-amber-500/40 shadow-lg'
                     : 'bg-slate-900/70 border-slate-800 text-slate-400 hover:border-slate-700 hover:bg-slate-900'
                 }`}
@@ -270,7 +273,7 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
                     <span>⭐</span>
                     <span>เล่นเฉพาะใน Watchlist</span>
                   </span>
-                  {botConfig.scanMode === 'WATCHLIST' && (
+                  {(botConfig.scanMode ?? 'WATCHLIST') === 'WATCHLIST' && (
                     <span className="text-[10px] bg-amber-500/25 text-amber-300 border border-amber-500/50 px-2 py-0.5 rounded-full font-bold">
                       ใช้งานอยู่
                     </span>
@@ -313,7 +316,7 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
             </div>
 
             {/* Watchlist Manager Sub-Panel (เมื่ออยู่ในโหมด Watchlist) */}
-            {botConfig.scanMode === 'WATCHLIST' && (() => {
+            {(botConfig.scanMode ?? 'WATCHLIST') === 'WATCHLIST' && (() => {
               const currentWatchlist = Array.isArray(botConfig.watchlist) && botConfig.watchlist.length > 0
                 ? botConfig.watchlist
                 : ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'DOGEUSDT', 'ADAUSDT', 'XRPUSDT', 'SUIUSDT'];
@@ -923,16 +926,18 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
             </div>
 
             {/* Action Buttons */}
-            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-              <div className="text-xs">
-                <span className="block text-[10px] text-slate-500">ราคา {botConfig.symbol}:</span>
-                <span className="font-mono font-bold text-white text-sm">${currentPrice.toLocaleString()}</span>
+            <div className="pt-2 border-t border-slate-800/80 space-y-2.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-[11px] text-slate-400">ราคาตลาด {botConfig.symbol}:</span>
+                <span className="font-mono font-extrabold text-white text-sm">${currentPrice.toLocaleString()}</span>
               </div>
-              <div className="flex items-center space-x-2">
+
+              {/* Responsive Action Buttons Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <button
                   type="button"
                   onClick={() => onManualBuy(computedManualUsdt)}
-                  className="flex items-center space-x-1 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow transition"
+                  className="w-full flex items-center justify-center space-x-1.5 py-2.5 px-3 bg-emerald-600 hover:bg-emerald-500 active:scale-98 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-900/30 transition cursor-pointer"
                   title={`เปิดสัญญา Long ด้วยเงิน $${computedManualUsdt.toFixed(2)} USDT`}
                 >
                   <ArrowUpRight className="w-4 h-4" />
@@ -943,24 +948,26 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
                   <button
                     type="button"
                     onClick={() => onManualShort(computedManualUsdt)}
-                    className="flex items-center space-x-1 px-3.5 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold shadow transition"
+                    className="w-full flex items-center justify-center space-x-1.5 py-2.5 px-3 bg-purple-600 hover:bg-purple-500 active:scale-98 text-white rounded-xl text-xs font-bold shadow-lg shadow-purple-900/30 transition cursor-pointer"
                     title={`เปิดสัญญา Short ด้วยเงิน $${computedManualUsdt.toFixed(2)} USDT`}
                   >
                     <ArrowDownRight className="w-4 h-4" />
                     <span>Manual SHORT (${computedManualUsdt.toFixed(0)})</span>
                   </button>
                 )}
+              </div>
 
+              {activeDisplayPos && (
                 <button
                   type="button"
                   onClick={onManualSell}
-                  disabled={!activeDisplayPos}
-                  className="flex items-center space-x-1 px-3 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="w-full flex items-center justify-center space-x-1.5 py-2.5 px-4 bg-rose-600 hover:bg-rose-500 active:scale-98 text-white rounded-xl text-xs font-bold shadow-lg shadow-rose-900/40 transition cursor-pointer"
                   title="ปิดโพสิชันปัจจุบันทันที"
                 >
-                  <span>ปิดสัญญา (Close)</span>
+                  <X className="w-4 h-4" />
+                  <span>ปิดสัญญาปัจจุบัน (Close Position - {activeDisplayPos.symbol})</span>
                 </button>
-              </div>
+              )}
             </div>
           </div>
         </div>
@@ -1545,24 +1552,41 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
         </div>
       </div>
 
-      {/* Column 3: Live Bot Terminal Logs */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col justify-between h-[520px]">
+      {/* Column 3: Live Bot Terminal Logs (Collapsible on mobile) */}
+      <div className={`bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl flex flex-col justify-between transition-all duration-300 ${
+        isConsoleExpanded ? 'h-[500px]' : 'h-64 lg:h-[520px]'
+      }`}>
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
           <div className="flex items-center space-x-2">
             <Terminal className="w-5 h-5 text-cyan-400" />
             <h3 className="text-base font-bold text-white">Bot Activity Console</h3>
+            <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full font-mono">
+              {botLogs.length} logs
+            </span>
           </div>
-          <button
-            onClick={onClearLogs}
-            className="text-slate-500 hover:text-slate-300 p-1 rounded hover:bg-slate-800 transition"
-            title="ล้างบันทึก"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
+          <div className="flex items-center space-x-1.5">
+            {/* Mobile Toggle Expand / Collapse Button */}
+            <button
+              type="button"
+              onClick={() => setIsConsoleExpanded(!isConsoleExpanded)}
+              className="lg:hidden p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition"
+              title={isConsoleExpanded ? 'ย่อหน้าต่างบันทึก' : 'ขยายหน้าต่างบันทึก'}
+            >
+              {isConsoleExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </button>
+
+            <button
+              onClick={onClearLogs}
+              className="text-slate-500 hover:text-rose-400 p-1.5 rounded-lg hover:bg-slate-800 transition"
+              title="ล้างบันทึก"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {/* Console Log Window */}
-        <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 my-3 flex-1 overflow-y-auto space-y-2 font-mono text-[11px] text-slate-300 scrollbar-thin">
+        <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 my-2.5 flex-1 overflow-y-auto space-y-1.5 font-mono text-[11px] text-slate-300 scrollbar-thin">
           {botLogs.length === 0 ? (
             <div className="h-full flex items-center justify-center text-slate-600 text-xs">
               ยังไม่มีบันทึกกิจกรรมบอท
@@ -1573,9 +1597,9 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
                 key={idx}
                 className={`leading-relaxed border-b border-slate-900/60 pb-1 ${
                   log.includes('BUY') || log.includes('ซื้อ')
-                    ? 'text-emerald-400'
+                    ? 'text-emerald-400 font-semibold'
                     : log.includes('SELL') || log.includes('ขาย')
-                    ? 'text-rose-400'
+                    ? 'text-rose-400 font-semibold'
                     : log.includes('BLUE')
                     ? 'text-blue-400'
                     : log.includes('GREEN')
@@ -1591,7 +1615,7 @@ export const BotControlPanel: React.FC<BotControlPanelProps> = ({
           )}
         </div>
 
-        <div className="text-[10px] text-slate-500 flex items-center justify-between">
+        <div className="text-[10px] text-slate-500 flex items-center justify-between pt-1">
           <span>ตรวจสอบสัญญาณ CDC ทุกๆ 10 วินาที</span>
           <span>โหมด: {botConfig.mode}</span>
         </div>

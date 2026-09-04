@@ -640,16 +640,16 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans pb-12 antialiased overflow-x-hidden">
-      {/* Toast Notification Popup */}
+    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans pb-28 md:pb-12 antialiased overflow-x-hidden">
+      {/* Toast Notification Popup (Positioned above mobile bottom bar) */}
       {toastMessage && (
         <div
-          className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-2xl shadow-2xl border flex items-center space-x-2 text-xs font-bold transition-all animate-bounce ${
+          className={`fixed bottom-20 md:bottom-6 right-4 sm:right-6 z-50 px-4 py-2.5 sm:py-3 rounded-2xl shadow-2xl border flex items-center space-x-2 text-xs font-bold transition-all animate-bounce ${
             toastMessage.type === 'buy'
-              ? 'bg-emerald-600 text-white border-emerald-400'
+              ? 'bg-emerald-600 text-white border-emerald-400 shadow-emerald-900/40'
               : toastMessage.type === 'sell'
-              ? 'bg-rose-600 text-white border-rose-400'
-              : 'bg-slate-800 text-white border-slate-700'
+              ? 'bg-rose-600 text-white border-rose-400 shadow-rose-900/40'
+              : 'bg-slate-800 text-white border-slate-700 shadow-slate-900/50'
           }`}
         >
           <span>{toastMessage.text}</span>
@@ -683,7 +683,7 @@ export default function App() {
       )}
 
       {/* Main Content Body */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-6 space-y-6">
+      <main className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 pt-4 sm:pt-6 space-y-4 sm:space-y-6">
         {!authUser ? (
           <AuthGateView onLoginSuccess={handleLoginSuccess} />
         ) : (

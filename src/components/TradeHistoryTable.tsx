@@ -605,7 +605,88 @@ export const TradeHistoryTable: React.FC<TradeHistoryTableProps> = ({
                     </div>
                   </div>
 
-                  <div className="overflow-x-auto max-h-72 overflow-y-auto scrollbar-thin">
+                  {/* Mobile Positions Cards (md:hidden) */}
+                  <div className="md:hidden space-y-3">
+                    {livePositions.map((pos) => {
+                      const isLong = pos.positionAmt > 0 || pos.positionSide === 'LONG';
+                      const pnlUsdt = pos.unrealizedProfit || 0;
+                      const pnlPercent = pos.pnlPercent || 0;
+                      const isClosing = closingSymbol === pos.symbol;
+
+                      return (
+                        <div key={pos.symbol} className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-3 shadow-md">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center space-x-2">
+                              <span className="font-bold text-white text-base font-mono">{pos.symbol}</span>
+                              <span
+                                className={`px-2 py-0.5 rounded font-extrabold text-[10px] border ${
+                                  isLong
+                                    ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                                    : 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+                                }`}
+                              >
+                                {isLong ? 'LONG' : 'SHORT'} {pos.leverage || 1}x
+                              </span>
+                            </div>
+                            <div
+                              className={`px-2.5 py-1 rounded-lg font-extrabold text-xs border font-mono ${
+                                pnlUsdt >= 0
+                                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+                                  : 'bg-rose-500/20 text-rose-400 border-rose-500/40'
+                              }`}
+                            >
+                              {pnlUsdt >= 0 ? '+' : ''}${pnlUsdt.toFixed(2)} ({pnlPercent >= 0 ? '+' : ''}
+                              {pnlPercent.toFixed(2)}%)
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2 text-xs font-mono bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/60">
+                            <div>
+                              <span className="text-slate-500 text-[10px] block">ราคาเข้า:</span>
+                              <span className="text-slate-300 font-bold">{formatCryptoPrice(pos.entryPrice)}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 text-[10px] block">ราคาปัจจุบัน:</span>
+                              <span className="text-white font-bold">{formatCryptoPrice(pos.markPrice)}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 text-[10px] block">ทุนประกัน (Margin):</span>
+                              <span className="text-emerald-400 font-bold">${pos.initialMargin.toFixed(2)}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 text-[10px] block">ราคาล้างพอร์ต (Liq):</span>
+                              <span className="text-rose-400 font-bold">
+                                {pos.liquidationPrice ? formatCryptoPrice(pos.liquidationPrice) : '-'}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 pt-1">
+                            {onSelectSymbol && (
+                              <button
+                                onClick={() => onSelectSymbol(pos.symbol)}
+                                className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 active:scale-98 text-slate-200 rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1 border border-slate-700"
+                              >
+                                <ArrowUpRight className="w-3.5 h-3.5" />
+                                <span>ดูกราฟ CDC</span>
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleCloseLivePosition(pos)}
+                              disabled={isClosing}
+                              className="flex-1 py-2 bg-rose-600 hover:bg-rose-500 active:scale-98 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1 shadow-lg shadow-rose-900/40 disabled:opacity-50"
+                            >
+                              <XCircle className={`w-3.5 h-3.5 ${isClosing ? 'animate-spin' : ''}`} />
+                              <span>{isClosing ? 'กำลังปิด...' : 'ปิดสัญญา'}</span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Desktop Table View (hidden md:block) */}
+                  <div className="hidden md:block overflow-x-auto max-h-72 overflow-y-auto scrollbar-thin">
                     <table className="w-full text-left border-collapse text-xs font-mono">
                       <thead>
                         <tr className="bg-slate-950 text-slate-400 border-b border-slate-800">
@@ -758,8 +839,67 @@ export const TradeHistoryTable: React.FC<TradeHistoryTableProps> = ({
                   />
                 </div>
 
-                {/* Table */}
-                <div className="overflow-x-auto max-h-96 overflow-y-auto scrollbar-thin">
+                {/* Mobile Cards (md:hidden) */}
+                <div className="md:hidden space-y-2.5">
+                  {filteredLiveTrades.length === 0 ? (
+                    <div className="p-8 text-center text-slate-500 font-sans text-xs bg-slate-950 rounded-xl">
+                      {isLoadingLive ? 'กำลังโหลดข้อมูลจาก Binance API...' : 'ไม่พบประวัติออเดอร์ในกระเป๋าจริง'}
+                    </div>
+                  ) : (
+                    filteredLiveTrades.map((t, idx) => {
+                      const hasPnl = t.realizedPnl !== undefined && t.realizedPnl !== 0;
+                      const isWin = (t.realizedPnl || 0) >= 0;
+
+                      return (
+                        <div key={t.id ? `${t.id}_${idx}` : `livetrade_${idx}`} className="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-2 text-xs">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center space-x-2">
+                              <span className="font-bold text-white text-sm font-mono">{t.symbol}</span>
+                              {renderSideBadge(t.side, t.reason)}
+                            </div>
+                            <span className="text-[10px] text-slate-400 font-sans">
+                              {new Date(t.time).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} · {new Date(t.time).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' })}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2 text-xs font-mono bg-slate-900/60 p-2 rounded-lg">
+                            <div>
+                              <span className="text-slate-500 text-[10px] block">ราคา:</span>
+                              <span className="text-white font-bold">{t.price > 0 ? formatCryptoPrice(t.price) : '-'}</span>
+                            </div>
+                            <div>
+                              <span className="text-slate-500 text-[10px] block">มูลค่า:</span>
+                              <span className="text-slate-200 font-bold">${t.quoteQty.toFixed(2)}</span>
+                            </div>
+                            {hasPnl && (
+                              <div>
+                                <span className="text-slate-500 text-[10px] block">Realized PnL:</span>
+                                <span className={`font-bold ${isWin ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                  {isWin ? '+' : ''}${t.realizedPnl?.toFixed(2)}
+                                </span>
+                              </div>
+                            )}
+                            {t.commission && t.commission > 0 && (
+                              <div>
+                                <span className="text-slate-500 text-[10px] block">ค่าธรรมเนียม:</span>
+                                <span className="text-slate-400">{t.commission.toFixed(4)} {t.commissionAsset || 'USDT'}</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {t.reason && (
+                            <div className="text-[10px] text-slate-400 font-sans pt-0.5">
+                              รายละเอียด: {t.reason}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                {/* Desktop Table View (hidden md:block) */}
+                <div className="hidden md:block overflow-x-auto max-h-96 overflow-y-auto scrollbar-thin">
                   <table className="w-full text-left border-collapse text-xs font-mono">
                     <thead>
                       <tr className="bg-slate-950 text-slate-400 border-b border-slate-800">
@@ -874,7 +1014,93 @@ export const TradeHistoryTable: React.FC<TradeHistoryTableProps> = ({
                 </div>
               </div>
 
-              <div className="overflow-x-auto max-h-72 overflow-y-auto scrollbar-thin">
+              {/* Mobile Positions Cards (md:hidden) */}
+              <div className="md:hidden space-y-3">
+                {activePositions.map((pos) => {
+                  const ticker = (allTickers || []).find((t) => t.symbol === pos.symbol);
+                  const livePrice = ticker ? ticker.lastPrice : pos.entryPrice;
+                  const pnlUsdt = pos.currentPnlUsdt ?? 0;
+                  const pnlPercent = pos.currentPnlPercent ?? 0;
+                  const margin = pos.marginUsdt || pos.usdtInvested;
+                  const lev = pos.leverage || 1;
+
+                  return (
+                    <div key={pos.symbol} className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-3 shadow-md">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2">
+                          <span className="font-bold text-white text-base font-mono">{pos.symbol}</span>
+                          <span
+                            className={`px-2 py-0.5 rounded font-extrabold text-[10px] border ${
+                              pos.side === 'SHORT'
+                                ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+                                : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                            }`}
+                          >
+                            {pos.side} {lev}x
+                          </span>
+                        </div>
+                        <div
+                          className={`px-2.5 py-1 rounded-lg font-extrabold text-xs border font-mono ${
+                            pnlUsdt >= 0
+                              ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+                              : 'bg-rose-500/20 text-rose-400 border-rose-500/40'
+                          }`}
+                        >
+                          {pnlUsdt >= 0 ? '+' : ''}${pnlUsdt.toFixed(2)} ({pnlPercent >= 0 ? '+' : ''}
+                          {pnlPercent.toFixed(2)}%)
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-xs font-mono bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/60">
+                        <div>
+                          <span className="text-slate-500 text-[10px] block">ราคาเข้า:</span>
+                          <span className="text-slate-300 font-bold">{formatCryptoPrice(pos.entryPrice)}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 text-[10px] block">ราคาปัจจุบัน:</span>
+                          <span className="text-white font-bold">
+                            {formatCryptoPrice(livePrice > 0 ? livePrice : pos.entryPrice)}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 text-[10px] block">ทุนประกัน (Margin):</span>
+                          <span className="text-emerald-400 font-bold">${margin.toFixed(2)}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 text-[10px] block">ราคาล้างพอร์ต (Liq):</span>
+                          <span className="text-rose-400 font-bold">
+                            {pos.liquidationPrice ? formatCryptoPrice(pos.liquidationPrice) : '-'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 pt-1">
+                        {onSelectSymbol && (
+                          <button
+                            onClick={() => onSelectSymbol(pos.symbol)}
+                            className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 active:scale-98 text-slate-200 rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1 border border-slate-700"
+                          >
+                            <ArrowUpRight className="w-3.5 h-3.5" />
+                            <span>ดูกราฟ CDC</span>
+                          </button>
+                        )}
+                        {onClosePosition && (
+                          <button
+                            onClick={() => onClosePosition(pos.symbol)}
+                            className="flex-1 py-2 bg-rose-600 hover:bg-rose-500 active:scale-98 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1 shadow-lg shadow-rose-900/40"
+                          >
+                            <XCircle className="w-3.5 h-3.5" />
+                            <span>ปิดสัญญา</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Desktop Table View (hidden md:block) */}
+              <div className="hidden md:block overflow-x-auto max-h-72 overflow-y-auto scrollbar-thin">
                 <table className="w-full text-left border-collapse text-xs font-mono">
                   <thead>
                     <tr className="bg-slate-950 text-slate-400 border-b border-slate-800">
@@ -917,8 +1143,8 @@ export const TradeHistoryTable: React.FC<TradeHistoryTableProps> = ({
                             <span
                               className={`px-2 py-0.5 rounded font-extrabold text-[11px] border ${
                                 pos.side === 'SHORT'
-                                  ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
-                                  : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                                ? 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+                                : 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
                               }`}
                             >
                               {pos.side}
@@ -1031,8 +1257,76 @@ export const TradeHistoryTable: React.FC<TradeHistoryTableProps> = ({
               />
             </div>
 
-            {/* History Table */}
-            <div className="overflow-x-auto max-h-96 overflow-y-auto scrollbar-thin">
+            {/* Mobile Cards View (md:hidden) */}
+            <div className="md:hidden space-y-2.5">
+              {filteredPaperTrades.length === 0 ? (
+                <div className="p-6 text-center text-slate-500 font-sans text-xs bg-slate-950 rounded-xl">
+                  ไม่พบประวัติออเดอร์
+                </div>
+              ) : (
+                filteredPaperTrades.map((t, idx) => {
+                  const activePosForTrade = activePositions.find(
+                    (p) =>
+                      p.symbol === t.symbol &&
+                      (p.side === t.side ||
+                        (p.side === 'LONG' && t.side === 'BUY') ||
+                        (p.side === 'SHORT' && t.side === 'SELL'))
+                  );
+
+                  return (
+                    <div key={t.id ? `${t.id}_${idx}` : `trade_${idx}`} className="bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-2 text-xs">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2">
+                          <span className="font-bold text-white text-sm font-mono">{t.symbol}</span>
+                          {renderSideBadge(t.side, t.reason)}
+                        </div>
+                        <span className="text-[10px] text-slate-400 font-sans">
+                          {new Date(t.timestamp).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} · {new Date(t.timestamp).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' })}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-xs font-mono bg-slate-900/60 p-2 rounded-lg">
+                        <div>
+                          <span className="text-slate-500 text-[10px] block">ราคา:</span>
+                          <span className="text-white font-bold">{formatCryptoPrice(t.price)}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 text-[10px] block">มูลค่า (USDT):</span>
+                          <span className="text-slate-200 font-bold">${t.usdtValue.toFixed(2)}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 text-[10px] block">จำนวน:</span>
+                          <span className="text-slate-300">{formatCryptoAmount(t.amount)}</span>
+                        </div>
+                        <div>
+                          <span className="text-slate-500 text-[10px] block">PnL:</span>
+                          {activePosForTrade ? (
+                            <span className="text-emerald-400 font-bold">
+                              ⚡ ${(activePosForTrade.currentPnlUsdt ?? 0).toFixed(2)}
+                            </span>
+                          ) : t.pnlUsdt !== undefined ? (
+                            <span className={`font-bold ${t.pnlUsdt >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {t.pnlUsdt >= 0 ? '+' : ''}${t.pnlUsdt.toFixed(2)}
+                            </span>
+                          ) : (
+                            <span className="text-slate-500">-</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {t.reason && (
+                        <div className="text-[10px] text-slate-400 font-sans pt-0.5">
+                          เหตุผล: {t.reason}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Desktop History Table (hidden md:block) */}
+            <div className="hidden md:block overflow-x-auto max-h-96 overflow-y-auto scrollbar-thin">
               <table className="w-full text-left border-collapse text-xs font-mono">
                 <thead>
                   <tr className="bg-slate-950 text-slate-400 border-b border-slate-800">

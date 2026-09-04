@@ -93,7 +93,7 @@ const DEFAULT_SERVER_STATE: ServerState = {
     buyOnSignal: ['BLUE', 'GREEN'],
     sellOnSignal: ['RED'],
     mode: 'BINANCE_LIVE',
-    scanMode: 'MULTI_SCAN',
+    scanMode: 'WATCHLIST',
     watchlist: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'DOGEUSDT', 'ADAUSDT', 'XRPUSDT', 'SUIUSDT'],
     directionMode: 'BOTH',
     isActive: false,
@@ -662,17 +662,18 @@ async function runServerBotCycle() {
   isCycleRunning = true;
   try {
     const dirMode = config.directionMode ?? 'LONG_ONLY';
+    const effectiveScanMode = config.scanMode || 'WATCHLIST';
     let symbolsToEvaluate: string[] = [config.symbol];
-    if (config.scanMode === 'WATCHLIST') {
+    if (effectiveScanMode === 'WATCHLIST') {
       symbolsToEvaluate = config.watchlist && config.watchlist.length > 0
         ? config.watchlist
         : ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'DOGEUSDT', 'ADAUSDT', 'XRPUSDT', 'SUIUSDT'];
-    } else if (config.scanMode === 'MULTI_SCAN') {
+    } else if (effectiveScanMode === 'MULTI_SCAN') {
       symbolsToEvaluate = POPULAR_PAIRS.slice(0, 15);
     } else {
       symbolsToEvaluate = [config.symbol];
     }
-    const isMultiScan = config.scanMode === 'MULTI_SCAN' || config.scanMode === 'WATCHLIST';
+    const isMultiScan = effectiveScanMode === 'MULTI_SCAN' || effectiveScanMode === 'WATCHLIST';
 
     for (const sym of symbolsToEvaluate) {
       if (!serverState.botConfig.isActive) break;
@@ -1096,7 +1097,7 @@ app.get('/api/bot/state', (req, res) => {
     tradeHistory: serverState.tradeHistory,
     botLogs: serverState.botLogs,
     telegramConfig: serverState.telegramConfig,
-    bannedUntil: binanceBannedUntil,
+    bannedUntil: Math.max(binanceFuturesBannedUntil, binanceSpotBannedUntil),
     serverTime: Date.now(),
     isServerRunning: true,
   });

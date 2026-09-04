@@ -6,7 +6,31 @@
     overscroll-behavior-y: auto;
     touch-action: pan-y;
     scroll-behavior: smooth;
+    -webkit-tap-highlight-color: transparent;
   }
+
+  /* Prevent auto-zoom on iOS when tapping inputs */
+  @media screen and (max-width: 767px) {
+    input, select, textarea {
+      font-size: 16px !important;
+    }
+  }
+}
+
+/* Safe Area Inset variables for notch and home bar */
+:root {
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.pt-safe {
+  padding-top: env(safe-area-inset-top, 0px);
 }
 
 /* Smooth mobile momentum scrolling for horizontal containers */
