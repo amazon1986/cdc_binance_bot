@@ -1,0 +1,14 @@
+services:
+  cdc-binance-bot:
+    build: .
+    container_name: cdc_trading_bot
+    restart: always
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
