@@ -257,7 +257,8 @@ function calculateOrderSize(config: BotConfig, account: PaperAccount): number {
 }
 
 // ==================== BINANCE RATE LIMIT CIRCUIT BREAKER & CACHING ====================
-let binanceBannedUntil = 0;
+let binanceSpotBannedUntil = 0;
+let binanceFuturesBannedUntil = 0;
 let lastBanWarningTime = 0;
 
 interface ServerCacheItem<T> {
@@ -286,7 +287,7 @@ function getServerTimeframeCacheTtl(interval: string): number {
   }
 }
 
-function handleBinanceRateLimitError(status: number, data: any, endpointName = 'API') {
+function handleBinanceRateLimitError(status: number, data: any, endpointName = 'API', isFutures = false) {
   if (status === 418 || status === 429) {
     let banUntil = Date.now() + 60000; // default 1 min
     const msg = typeof data === 'string' ? data : (data?.msg || JSON.stringify(data || ''));
@@ -297,20 +298,27 @@ function handleBinanceRateLimitError(status: number, data: any, endpointName = '
       banUntil = parseInt(match[1], 10);
     }
 
-    binanceBannedUntil = Math.max(binanceBannedUntil, banUntil);
+    const isFut = isFutures || endpointName.toLowerCase().includes('futures') || endpointName.toLowerCase().includes('fapi');
+    if (isFut) {
+      binanceFuturesBannedUntil = Math.max(binanceFuturesBannedUntil, banUntil);
+    } else {
+      binanceSpotBannedUntil = Math.max(binanceSpotBannedUntil, banUntil);
+    }
+
+    const targetBannedUntil = isFut ? binanceFuturesBannedUntil : binanceSpotBannedUntil;
     const now = Date.now();
     if (now - lastBanWarningTime > 15000) {
       lastBanWarningTime = now;
-      const waitSeconds = Math.max(0, Math.ceil((binanceBannedUntil - now) / 1000));
-      const banDateStr = new Date(binanceBannedUntil).toLocaleTimeString('th-TH', { timeZone: 'Asia/Bangkok' });
-      addServerLog(`⚠️ [BINANCE RATE LIMIT / IP BAN] ตรวจพบการจำกัดคำขอ (HTTP ${status}) จาก Binance (${endpointName}): พักการส่งคำขอชั่วคราว ${waitSeconds} วินาที (จนถึง ${banDateStr}) เพื่อป้องกันการถูกต่อเวลาแบน`);
-      console.warn(`[Binance Rate Limit] IP Banned until ${binanceBannedUntil} (${waitSeconds}s remaining)`);
+      const waitSeconds = Math.max(0, Math.ceil((targetBannedUntil - now) / 1000));
+      const banDateStr = new Date(targetBannedUntil).toLocaleTimeString('th-TH', { timeZone: 'Asia/Bangkok' });
+      addServerLog(`⚠️ [BINANCE RATE LIMIT / IP BAN] ตรวจพบการจำกัดคำขอ (HTTP ${status}) จาก Binance ${isFut ? 'Futures' : 'Spot'} (${endpointName}): พักการส่งคำขอชั่วคราว ${waitSeconds} วินาที (จนถึง ${banDateStr})`);
+      console.warn(`[Binance Rate Limit ${isFut ? 'Futures' : 'Spot'}] IP Banned until ${targetBannedUntil} (${waitSeconds}s remaining)`);
     }
   }
 }
 
-async function fetchKlinesDirect(symbol: string, interval: string, limit = 300): Promise<KlineData[]> {
-  const cacheKey = `${symbol}_${interval}_${limit}`;
+async function fetchKlinesDirect(symbol: string, interval: string, limit = 300, isFutures = false): Promise<KlineData[]> {
+  const cacheKey = `${symbol}_${interval}_${limit}_${isFutures ? 'fut' : 'spot'}`;
   const now = Date.now();
   const ttl = getServerTimeframeCacheTtl(interval);
   const cached = serverKlineCache.get(cacheKey);
@@ -318,40 +326,49 @@ async function fetchKlinesDirect(symbol: string, interval: string, limit = 300):
     return cached.data;
   }
 
-  if (now < binanceBannedUntil) {
+  const isBanned = isFutures ? (now < binanceFuturesBannedUntil) : (now < binanceSpotBannedUntil);
+  if (isBanned) {
     if (cached) return cached.data;
     return [];
   }
 
-  try {
-    const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
-    const res = await fetch(url);
-    if (!res.ok) {
-      const errText = await res.text().catch(() => '');
-      handleBinanceRateLimitError(res.status, errText, `klines ${symbol}`);
-      if (cached) return cached.data;
-      return [];
-    }
-    const data = await res.json();
-    if (!Array.isArray(data)) {
-      if (cached) return cached.data;
-      return [];
-    }
-    const result: KlineData[] = data.map((d: any) => ({
-      time: Math.floor(d[0] / 1000),
-      open: parseFloat(d[1]),
-      high: parseFloat(d[2]),
-      low: parseFloat(d[3]),
-      close: parseFloat(d[4]),
-      volume: parseFloat(d[5]),
-    }));
+  const candidateUrls = isFutures
+    ? [`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`]
+    : [
+        `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
+        `https://api1.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
+        `https://api2.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
+        `https://api3.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`
+      ];
 
-    serverKlineCache.set(cacheKey, { data: result, expiry: now + ttl });
-    return result;
-  } catch (err) {
-    if (cached) return cached.data;
-    return [];
+  for (const url of candidateUrls) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        handleBinanceRateLimitError(res.status, errText, `klines ${symbol}`, isFutures);
+        continue;
+      }
+      const data = await res.json();
+      if (!Array.isArray(data) || data.length === 0) continue;
+      const result: KlineData[] = data.map((d: any) => ({
+        time: Math.floor(d[0] / 1000),
+        open: parseFloat(d[1]),
+        high: parseFloat(d[2]),
+        low: parseFloat(d[3]),
+        close: parseFloat(d[4]),
+        volume: parseFloat(d[5]),
+      }));
+
+      serverKlineCache.set(cacheKey, { data: result, expiry: now + ttl });
+      return result;
+    } catch (err) {
+      continue;
+    }
   }
+
+  if (cached) return cached.data;
+  return [];
 }
 
 // Symbol Filter & Precision Cache for Binance (Futures & Spot)
@@ -630,11 +647,14 @@ async function runServerBotCycle() {
   if (!config.isActive) return;
 
   const now = Date.now();
-  if (now < binanceBannedUntil) {
-    const waitSec = Math.ceil((binanceBannedUntil - now) / 1000);
+  const isFutures = (config.marketType || 'FUTURES') === 'FUTURES';
+  const isBanned = isFutures ? (now < binanceFuturesBannedUntil) : (now < binanceSpotBannedUntil);
+  if (isBanned) {
+    const banUntil = isFutures ? binanceFuturesBannedUntil : binanceSpotBannedUntil;
+    const waitSec = Math.ceil((banUntil - now) / 1000);
     if (now - lastBanWarningTime > 20000) {
       lastBanWarningTime = now;
-      addServerLog(`⏳ [CIRCUIT BREAKER] พักรอบการทำงานของบอทชั่วคราวเนื่องจากติด Rate Limit จาก Binance (เหลืออีก ${waitSec} วินาที)...`);
+      addServerLog(`⏳ [CIRCUIT BREAKER] พักรอบการทำงานของบอทชั่วคราวเนื่องจากติด Rate Limit จาก Binance ${isFutures ? 'Futures' : 'Spot'} (เหลืออีก ${waitSec} วินาที)...`);
     }
     return;
   }
@@ -656,9 +676,10 @@ async function runServerBotCycle() {
 
     for (const sym of symbolsToEvaluate) {
       if (!serverState.botConfig.isActive) break;
-      if (Date.now() < binanceBannedUntil) break;
+      const bannedCheck = isFutures ? (Date.now() < binanceFuturesBannedUntil) : (Date.now() < binanceSpotBannedUntil);
+      if (bannedCheck) break;
 
-      const rawCandles = await fetchKlinesDirect(sym, config.timeframe, 300);
+      const rawCandles = await fetchKlinesDirect(sym, config.timeframe, 300, isFutures);
       if (rawCandles.length < 30) continue;
 
       const cdcCandles = calculateCDCActionZone(rawCandles, config.fastEmaPeriod, config.slowEmaPeriod);
@@ -1524,22 +1545,37 @@ app.get('/api/binance/klines', async (req, res) => {
       return res.json(cached.data);
     }
 
-    if (now < binanceBannedUntil) {
+    if (now < binanceSpotBannedUntil) {
       if (cached) return res.json(cached.data);
-      return res.status(429).json({ error: 'Binance API is in rate limit cooldown', bannedUntil: binanceBannedUntil });
+      return res.status(429).json({ error: 'Binance API is in rate limit cooldown', bannedUntil: binanceSpotBannedUntil });
     }
 
-    const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
-    const response = await fetch(url);
-    if (!response.ok) {
-      const errText = await response.text().catch(() => '');
-      handleBinanceRateLimitError(response.status, errText, `klines ${symbol}`);
-      if (cached) return res.json(cached.data);
-      return res.status(response.status).json({ error: 'Binance API request failed', details: errText });
+    const candidateUrls = [
+      `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
+      `https://api1.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
+      `https://api2.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
+      `https://api3.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
+    ];
+
+    let lastErrText = '';
+    for (const url of candidateUrls) {
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          lastErrText = await response.text().catch(() => '');
+          handleBinanceRateLimitError(response.status, lastErrText, `klines ${symbol}`);
+          continue;
+        }
+        const data = await response.json();
+        serverKlineCache.set(cacheKey, { data, expiry: now + ttl });
+        return res.json(data);
+      } catch (e) {
+        continue;
+      }
     }
-    const data = await response.json();
-    serverKlineCache.set(cacheKey, { data, expiry: now + ttl });
-    return res.json(data);
+
+    if (cached) return res.json(cached.data);
+    return res.status(502).json({ error: 'Binance API request failed', details: lastErrText });
   } catch (error: any) {
     return res.status(500).json({ error: sanitizeErrorMessage(error) });
   }
@@ -1556,26 +1592,44 @@ app.get('/api/binance/ticker24h', async (req, res) => {
       return res.json(serverTickerCache.data);
     }
 
-    if (now < binanceBannedUntil) {
+    if (now < binanceSpotBannedUntil) {
       if (serverTickerCache) return res.json(serverTickerCache.data);
-      return res.status(429).json({ error: 'Binance API is in rate limit cooldown', bannedUntil: binanceBannedUntil });
+      return res.status(429).json({ error: 'Binance API is in rate limit cooldown', bannedUntil: binanceSpotBannedUntil });
     }
 
-    const url = symbol
-      ? `https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`
-      : `https://api.binance.com/api/v3/ticker/24hr`;
-    const response = await fetch(url);
-    if (!response.ok) {
-      const errText = await response.text().catch(() => '');
-      handleBinanceRateLimitError(response.status, errText, 'ticker24h');
-      if (serverTickerCache) return res.json(serverTickerCache.data);
-      return res.status(response.status).json({ error: 'Ticker request failed', details: errText });
+    const candidateUrls = symbol
+      ? [
+          `https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`,
+          `https://api1.binance.com/api/v3/ticker/24hr?symbol=${symbol}`,
+          `https://api2.binance.com/api/v3/ticker/24hr?symbol=${symbol}`,
+        ]
+      : [
+          `https://api.binance.com/api/v3/ticker/24hr`,
+          `https://api1.binance.com/api/v3/ticker/24hr`,
+          `https://api2.binance.com/api/v3/ticker/24hr`,
+        ];
+
+    let lastErr = '';
+    for (const url of candidateUrls) {
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          lastErr = await response.text().catch(() => '');
+          handleBinanceRateLimitError(response.status, lastErr, 'ticker24h');
+          continue;
+        }
+        const data = await response.json();
+        if (!symbol) {
+          serverTickerCache = { data, expiry: now + 60000 }; // 60s TTL
+        }
+        return res.json(data);
+      } catch (e) {
+        continue;
+      }
     }
-    const data = await response.json();
-    if (!symbol) {
-      serverTickerCache = { data, expiry: now + 60000 }; // 60s TTL
-    }
-    return res.json(data);
+
+    if (serverTickerCache) return res.json(serverTickerCache.data);
+    return res.status(502).json({ error: 'Ticker request failed', details: lastErr });
   } catch (error: any) {
     return res.status(500).json({ error: sanitizeErrorMessage(error) });
   }
@@ -1595,7 +1649,7 @@ app.get('/api/binance/depth', async (req, res) => {
       return res.json(cached.data);
     }
 
-    if (now < binanceBannedUntil) {
+    if (now < binanceSpotBannedUntil) {
       if (cached) return res.json(cached.data);
       return res.status(429).json({ error: 'Binance API is in rate limit cooldown' });
     }
@@ -1630,7 +1684,7 @@ app.get('/api/binance/exchangeInfo', async (req, res) => {
       return res.json(cached.data);
     }
 
-    if (now < binanceBannedUntil) {
+    if (now < binanceSpotBannedUntil) {
       if (cached) return res.json(cached.data);
       return res.status(429).json({ error: 'Binance API is in rate limit cooldown' });
     }
@@ -1698,8 +1752,9 @@ app.post('/api/binance/account', async (req, res) => {
       return res.json(cached.data);
     }
 
-    if (now < binanceBannedUntil && cached) {
-      return res.json({ ...cached.data, isCached: true });
+    if (now < binanceSpotBannedUntil) {
+      if (cached) return res.json({ ...cached.data, isCached: true });
+      return res.status(429).json({ error: 'Binance Spot API is in cooldown due to IP rate limit', bannedUntil: binanceSpotBannedUntil });
     }
 
     const baseUrl = isTestnet
@@ -1716,7 +1771,7 @@ app.post('/api/binance/account', async (req, res) => {
 
     const data = await response.json();
     if (!response.ok) {
-      handleBinanceRateLimitError(response.status, data, 'spot account');
+      handleBinanceRateLimitError(response.status, data, 'spot account', false);
       if (cached) return res.json({ ...cached.data, isCached: true });
       return res.status(response.status).json({ error: data.msg || 'Binance Account API error' });
     }
@@ -1827,8 +1882,9 @@ app.post('/api/binance/futures/account', async (req, res) => {
       return res.json(cached.data);
     }
 
-    if (now < binanceBannedUntil && cached) {
-      return res.json({ ...cached.data, isCached: true });
+    if (now < binanceFuturesBannedUntil) {
+      if (cached) return res.json({ ...cached.data, isCached: true });
+      return res.status(429).json({ error: 'Binance Futures API is in cooldown due to IP rate limit', bannedUntil: binanceFuturesBannedUntil });
     }
 
     const baseUrl = isTestnet
@@ -1845,7 +1901,7 @@ app.post('/api/binance/futures/account', async (req, res) => {
 
     const data = await response.json();
     if (!response.ok) {
-      handleBinanceRateLimitError(response.status, data, 'futures account');
+      handleBinanceRateLimitError(response.status, data, 'futures account', true);
       if (cached) return res.json({ ...cached.data, isCached: true });
       return res.status(response.status).json({ error: data.msg || 'Binance Futures Account API error' });
     }
