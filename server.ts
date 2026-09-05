@@ -669,7 +669,16 @@ async function runServerBotCycle() {
         ? config.watchlist
         : ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'DOGEUSDT', 'ADAUSDT', 'XRPUSDT', 'SUIUSDT'];
     } else if (effectiveScanMode === 'MULTI_SCAN') {
-      symbolsToEvaluate = POPULAR_PAIRS.slice(0, 15);
+      if (serverTickerCache && Array.isArray(serverTickerCache.data) && serverTickerCache.data.length > 0) {
+        const sorted = serverTickerCache.data
+          .filter((t: any) => typeof t.symbol === 'string' && t.symbol.endsWith('USDT') && !t.symbol.includes('UP') && !t.symbol.includes('DOWN'))
+          .sort((a: any, b: any) => (parseFloat(b.quoteVolume || 0) - parseFloat(a.quoteVolume || 0)))
+          .slice(0, 40)
+          .map((t: any) => t.symbol);
+        symbolsToEvaluate = sorted.length >= 10 ? sorted : POPULAR_PAIRS;
+      } else {
+        symbolsToEvaluate = POPULAR_PAIRS;
+      }
     } else {
       symbolsToEvaluate = [config.symbol];
     }

@@ -297,6 +297,60 @@ export const POPULAR_PAIRS = [
   'FLOKIUSDT',
 ];
 
+export type MarketScanScope = 'WATCHLIST' | 'TOP_50' | 'TOP_100' | 'ALL_MARKET';
+
+/**
+ * Fetches active USDT symbols from Binance market sorted by 24h trading volume.
+ * Filters out stable-to-stable pairs (e.g., USDCUSDT, FDUSDUSDT) and leveraged tokens.
+ */
+export async function fetchActiveMarketSymbols(
+  scope: MarketScanScope = 'TOP_50',
+  customWatchlist: string[] = []
+): Promise<string[]> {
+  if (scope === 'WATCHLIST') {
+    return customWatchlist && customWatchlist.length > 0 ? customWatchlist : POPULAR_PAIRS;
+  }
+
+  try {
+    const tickers = await fetchBinanceTicker24h();
+    if (!tickers || tickers.length === 0) {
+      return POPULAR_PAIRS;
+    }
+
+    const excludedBases = new Set([
+      'USDC', 'FDUSD', 'TUSD', 'BUSD', 'EUR', 'GBP', 'AUD', 'DAI', 'PAX', 'USDP', 'AEUR'
+    ]);
+
+    // Filter active USDT pairs with reasonable liquidity (> $100k 24h volume)
+    const validPairs = tickers
+      .filter((t) => {
+        if (!t.symbol.endsWith('USDT')) return false;
+        const base = t.symbol.replace('USDT', '');
+        if (excludedBases.has(base)) return false;
+        if (base.endsWith('UP') || base.endsWith('DOWN') || base.endsWith('BULL') || base.endsWith('BEAR')) return false;
+        return t.quoteVolume > 100000;
+      })
+      .sort((a, b) => b.quoteVolume - a.quoteVolume)
+      .map((t) => t.symbol);
+
+    if (validPairs.length === 0) {
+      return POPULAR_PAIRS;
+    }
+
+    if (scope === 'TOP_50') {
+      return validPairs.slice(0, 50);
+    }
+    if (scope === 'TOP_100') {
+      return validPairs.slice(0, 100);
+    }
+    // ALL_MARKET: top 250 liquid pairs
+    return validPairs.slice(0, 250);
+  } catch (err) {
+    console.error('Failed to fetch active market symbols:', err);
+    return POPULAR_PAIRS;
+  }
+}
+
 export interface SymbolExchangeRules {
   symbol: string;
   stepSize: number;

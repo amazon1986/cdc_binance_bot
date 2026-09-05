@@ -1,6 +1,13 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Timeframe, ScannerCoinResult, CDCZoneColor, ConfirmationStatus } from '../types';
-import { fetchBinanceKlines, fetchBinanceTicker24h, POPULAR_PAIRS, formatCryptoPrice } from '../lib/binanceApi';
+import {
+  fetchBinanceKlines,
+  fetchBinanceTicker24h,
+  fetchActiveMarketSymbols,
+  MarketScanScope,
+  POPULAR_PAIRS,
+  formatCryptoPrice
+} from '../lib/binanceApi';
 import { calculateCDCActionZone, getZoneColorHex, getZoneNameTh, evaluateCoinQuality } from '../lib/cdcIndicator';
 import { getStoredSymbols, saveStoredSymbols, getStoredPaperAccount } from '../lib/botStore';
 import {
@@ -24,6 +31,7 @@ import {
   Filter,
   ShieldCheck,
   Info,
+  Globe,
 } from 'lucide-react';
 
 interface MarketScannerProps {
@@ -72,6 +80,10 @@ export const MarketScanner: React.FC<MarketScannerProps> = ({ onSelectCoin, watc
     }
   }, [watchlist]);
 
+  const [scanScope, setScanScope] = useState<MarketScanScope>('WATCHLIST');
+  const [scanningSymbol, setScanningSymbol] = useState<string>('');
+  const [totalMarketCount, setTotalMarketCount] = useState<number>(0);
+
   const [newSymbolInput, setNewSymbolInput] = useState('');
   const [inputError, setInputError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -85,79 +97,110 @@ export const MarketScanner: React.FC<MarketScannerProps> = ({ onSelectCoin, watc
   const [scanResults, setScanResults] = useState<ScannerCoinResult[]>([]);
   const [scanProgress, setScanProgress] = useState(0);
 
-  const runScanner = async (symbolsToScan = coinList) => {
-    if (symbolsToScan.length === 0) {
-      setScanResults([]);
-      return;
+  const runScanner = async (overrideScope?: MarketScanScope | string[], customSymbols?: string[]) => {
+    let scope: MarketScanScope = scanScope;
+    let symbolsToScan: string[] = [];
+
+    if (Array.isArray(overrideScope)) {
+      scope = 'WATCHLIST';
+      symbolsToScan = overrideScope;
+    } else {
+      if (overrideScope) scope = overrideScope;
+      if (customSymbols && customSymbols.length > 0) {
+        symbolsToScan = customSymbols;
+      } else {
+        symbolsToScan = await fetchActiveMarketSymbols(scope, coinList);
+      }
     }
 
     setIsScanning(true);
     setScanProgress(0);
-    const results: ScannerCoinResult[] = [];
+    setTotalMarketCount(symbolsToScan.length);
+
+    if (symbolsToScan.length === 0) {
+      setScanResults([]);
+      setIsScanning(false);
+      return;
+    }
 
     // Fetch 24h tickers first for real-time prices, volume and changes
     const tickers = await fetchBinanceTicker24h();
     const tickerMap = new Map(tickers.map((t) => [t.symbol, t]));
+    const results: ScannerCoinResult[] = [];
 
-    for (let i = 0; i < symbolsToScan.length; i++) {
-      const sym = symbolsToScan[i];
-      try {
-        const rawCandles = await fetchBinanceKlines(sym, timeframe, 100);
-        const cdcCandles = calculateCDCActionZone(rawCandles, 12, 26);
+    // Parallel batch scanning: 6 symbols simultaneously for high speed
+    const BATCH_SIZE = 6;
+    let completedCount = 0;
 
-        if (cdcCandles.length > 0) {
-          const latest = cdcCandles[cdcCandles.length - 1];
-          const ticker = tickerMap.get(sym);
-          const priceChange24h = ticker ? ticker.priceChangePercent : 0;
-          const volume24h = ticker ? ticker.quoteVolume : 0;
+    for (let i = 0; i < symbolsToScan.length; i += BATCH_SIZE) {
+      const batch = symbolsToScan.slice(i, i + BATCH_SIZE);
+      setScanningSymbol(batch.join(', '));
 
-          const emaFast = latest.emaFast ?? latest.close;
-          const emaSlow = latest.emaSlow ?? latest.close;
-          const diffPct = emaSlow > 0 ? ((emaFast - emaSlow) / emaSlow) * 100 : 0;
+      await Promise.all(
+        batch.map(async (sym) => {
+          try {
+            const rawCandles = await fetchBinanceKlines(sym, timeframe, 100);
+            const cdcCandles = calculateCDCActionZone(rawCandles, 12, 26);
 
-          // Uncle Chaloke Extended Quality Analysis
-          const evaluation = evaluateCoinQuality(cdcCandles, priceChange24h, volume24h);
+            if (cdcCandles.length > 0) {
+              const latest = cdcCandles[cdcCandles.length - 1];
+              const ticker = tickerMap.get(sym);
+              const priceChange24h = ticker ? ticker.priceChangePercent : 0;
+              const volume24h = ticker ? ticker.quoteVolume : 0;
 
-          results.push({
-            symbol: sym,
-            currentPrice: latest.close,
-            priceChange24h,
-            volume24h,
-            timeframe,
-            zone: latest.zone || 'CYAN',
-            signal: latest.signal || 'NEUTRAL',
-            emaFast,
-            emaSlow,
-            trendStrength: Number(diffPct.toFixed(2)),
-            lastSignalTime: new Date(latest.time).toLocaleTimeString('th-TH', {
-              hour: '2-digit',
-              minute: '2-digit',
-            }),
-            barsSinceGoldenCross: evaluation.barsSinceGoldenCross,
-            barsSinceDeadCross: evaluation.barsSinceDeadCross,
-            isFreshGoldenCross: evaluation.isFreshGoldenCross,
-            isFreshDeadCross: evaluation.isFreshDeadCross,
-            confirmationStatus: evaluation.confirmationStatus,
-            rankType: evaluation.rankType,
-            signalQualityScore: evaluation.signalQualityScore,
-            reasonTh: evaluation.reasonTh,
-            actionRecommendationTh: evaluation.actionRecommendationTh,
-          });
-        }
-      } catch (err) {
-        console.error(`Error scanning ${sym}:`, err);
-      }
-      setScanProgress(Math.round(((i + 1) / symbolsToScan.length) * 100));
-      // Small pacing delay between symbols to avoid burst REST weight
-      await new Promise((r) => setTimeout(r, 80));
+              const emaFast = latest.emaFast ?? latest.close;
+              const emaSlow = latest.emaSlow ?? latest.close;
+              const diffPct = emaSlow > 0 ? ((emaFast - emaSlow) / emaSlow) * 100 : 0;
+
+              // Uncle Chaloke Extended Quality Analysis
+              const evaluation = evaluateCoinQuality(cdcCandles, priceChange24h, volume24h);
+
+              results.push({
+                symbol: sym,
+                currentPrice: latest.close,
+                priceChange24h,
+                volume24h,
+                timeframe,
+                zone: latest.zone || 'CYAN',
+                signal: latest.signal || 'NEUTRAL',
+                emaFast,
+                emaSlow,
+                trendStrength: Number(diffPct.toFixed(2)),
+                lastSignalTime: new Date(latest.time).toLocaleTimeString('th-TH', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                }),
+                barsSinceGoldenCross: evaluation.barsSinceGoldenCross,
+                barsSinceDeadCross: evaluation.barsSinceDeadCross,
+                isFreshGoldenCross: evaluation.isFreshGoldenCross,
+                isFreshDeadCross: evaluation.isFreshDeadCross,
+                confirmationStatus: evaluation.confirmationStatus,
+                rankType: evaluation.rankType,
+                signalQualityScore: evaluation.signalQualityScore,
+                reasonTh: evaluation.reasonTh,
+                actionRecommendationTh: evaluation.actionRecommendationTh,
+              });
+            }
+          } catch (err) {
+            console.error(`Error scanning ${sym}:`, err);
+          } finally {
+            completedCount++;
+            setScanProgress(Math.round((completedCount / symbolsToScan.length) * 100));
+          }
+        })
+      );
+
+      // Micro pacing delay between batches
+      await new Promise((r) => setTimeout(r, 60));
     }
 
     setScanResults(results);
     setIsScanning(false);
+    setScanningSymbol('');
   };
 
   useEffect(() => {
-    runScanner(coinList);
+    runScanner(scanScope);
   }, [timeframe]);
 
   // Handle Adding Symbol
@@ -227,16 +270,27 @@ export const MarketScanner: React.FC<MarketScannerProps> = ({ onSelectCoin, watc
   };
 
   // Load Preset List
-  const handleLoadPreset = (presetKey: string) => {
-    const list = PRESET_WATCHLISTS[presetKey] || POPULAR_PAIRS;
+  const handleLoadPreset = async (presetKey: string) => {
+    let list: string[] = [];
+    if (presetKey === 'TOP_50') {
+      list = await fetchActiveMarketSymbols('TOP_50');
+    } else if (presetKey === 'TOP_100') {
+      list = await fetchActiveMarketSymbols('TOP_100');
+    } else if (presetKey === 'ALL_MARKET') {
+      list = await fetchActiveMarketSymbols('ALL_MARKET');
+    } else {
+      list = PRESET_WATCHLISTS[presetKey] || POPULAR_PAIRS;
+    }
+
     setCoinList(list);
     saveStoredSymbols(list);
     if (onUpdateWatchlist) {
       onUpdateWatchlist(list);
     }
-    setSuccessMsg(`โหลดชุดเหรียญ ${presetKey} (${list.length} เหรียญ) สำเร็จ`);
+    setSuccessMsg(`โหลดชุดเหรียญ ${presetKey} (${list.length} เหรียญ) เข้า Watchlist เรียบร้อย`);
     setTimeout(() => setSuccessMsg(null), 3000);
-    runScanner(list);
+    setScanScope('WATCHLIST');
+    runScanner('WATCHLIST', list);
   };
 
   // Top Best Buys (Uncle Chaloke: เขียวซื้อ / Golden Cross +1 แท่ง)
@@ -353,7 +407,7 @@ export const MarketScanner: React.FC<MarketScannerProps> = ({ onSelectCoin, watc
           </div>
 
           <button
-            onClick={() => runScanner(coinList)}
+            onClick={() => runScanner(scanScope)}
             disabled={isScanning}
             className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold shadow-lg transition flex items-center space-x-1.5 disabled:opacity-50"
           >
@@ -361,6 +415,90 @@ export const MarketScanner: React.FC<MarketScannerProps> = ({ onSelectCoin, watc
             <span>{isScanning ? `กำลังสแกน ${scanProgress}%` : 'เริ่มสแกนใหม่'}</span>
           </button>
         </div>
+      </div>
+
+      {/* ==================== SCAN SCOPE SELECTOR BAR ==================== */}
+      <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-slate-950/90 border border-slate-800 rounded-2xl shadow-inner">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-bold text-slate-400 px-1 flex items-center gap-1.5">
+            <Globe className="w-4 h-4 text-emerald-400" />
+            โหมดการสแกน:
+          </span>
+
+          <button
+            onClick={() => {
+              setScanScope('WATCHLIST');
+              runScanner('WATCHLIST');
+            }}
+            disabled={isScanning}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 border cursor-pointer ${
+              scanScope === 'WATCHLIST'
+                ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-md font-black'
+                : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
+            }`}
+            title="สแกนเฉพาะรายชื่อเหรียญที่คุณบันทึกไว้ใน Watchlist"
+          >
+            <span>📌 Watchlist ของฉัน ({coinList.length})</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setScanScope('TOP_50');
+              runScanner('TOP_50');
+            }}
+            disabled={isScanning}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 border cursor-pointer ${
+              scanScope === 'TOP_50'
+                ? 'bg-cyan-500 text-slate-950 border-cyan-400 shadow-md font-black'
+                : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
+            }`}
+            title="สแกน 50 เหรียญแรกที่มีปริมาณการเทรด 24h สูงสุดบน Binance"
+          >
+            <Flame className="w-3.5 h-3.5" />
+            <span>🚀 Top 50 USDT</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setScanScope('TOP_100');
+              runScanner('TOP_100');
+            }}
+            disabled={isScanning}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 border cursor-pointer ${
+              scanScope === 'TOP_100'
+                ? 'bg-purple-500 text-white border-purple-400 shadow-md font-black'
+                : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
+            }`}
+            title="สแกน 100 เหรียญสภาพคล่องสูง ครอบคลุม L1, L2, DeFi และ Meme"
+          >
+            <Award className="w-3.5 h-3.5" />
+            <span>💎 Top 100 USDT</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setScanScope('ALL_MARKET');
+              runScanner('ALL_MARKET');
+            }}
+            disabled={isScanning}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 border cursor-pointer ${
+              scanScope === 'ALL_MARKET'
+                ? 'bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 border-amber-300 shadow-md font-black'
+                : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
+            }`}
+            title="ดึงคู่เหรียญ USDT ทั้งหมดในตลาด Binance ที่มีการซื้อขายจริง (200+ เหรียญ)"
+          >
+            <Globe className="w-3.5 h-3.5" />
+            <span>🌐 ทั้งตลาด Binance (200+ เหรียญ)</span>
+          </button>
+        </div>
+
+        {isScanning && (
+          <div className="flex items-center gap-2 text-xs font-mono text-emerald-400 bg-emerald-500/10 px-3 py-1.5 rounded-xl border border-emerald-500/20 max-w-xs truncate">
+            <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
+            <span className="truncate">กำลังสแกน {scanProgress}% {scanningSymbol ? `(${scanningSymbol})` : ''}</span>
+          </div>
+        )}
       </div>
 
       {/* ==================== HERO SECTION: BEST COIN PICKS ==================== */}
@@ -541,6 +679,30 @@ export const MarketScanner: React.FC<MarketScannerProps> = ({ onSelectCoin, watc
             </div>
 
             <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => handleLoadPreset('TOP_50')}
+                className="text-xs text-cyan-300 hover:text-white px-2.5 py-1 bg-cyan-950/60 hover:bg-cyan-900 border border-cyan-500/40 rounded-lg transition font-bold flex items-center space-x-1"
+                title="โหลด 50 เหรียญแรกที่มี Volume สูงสุดในตลาด Binance เข้า Watchlist"
+              >
+                <Flame className="w-3 h-3 text-cyan-400" />
+                <span>Top 50 USDT</span>
+              </button>
+              <button
+                onClick={() => handleLoadPreset('TOP_100')}
+                className="text-xs text-purple-300 hover:text-white px-2.5 py-1 bg-purple-950/60 hover:bg-purple-900 border border-purple-500/40 rounded-lg transition font-bold flex items-center space-x-1"
+                title="โหลด 100 เหรียญสภาพคล่องสูงเข้า Watchlist"
+              >
+                <Award className="w-3 h-3 text-purple-400" />
+                <span>Top 100 USDT</span>
+              </button>
+              <button
+                onClick={() => handleLoadPreset('ALL_MARKET')}
+                className="text-xs text-amber-300 hover:text-white px-2.5 py-1 bg-amber-950/60 hover:bg-amber-900 border border-amber-500/40 rounded-lg transition font-bold flex items-center space-x-1"
+                title="โหลดเหรียญ USDT ทั้งหมดในตลาด Binance (200+ เหรียญ) เข้า Watchlist"
+              >
+                <Globe className="w-3 h-3 text-amber-400" />
+                <span>ทั้งตลาด (All Market)</span>
+              </button>
               <button
                 onClick={() => handleLoadPreset('TOP_CAP')}
                 className="text-xs text-slate-300 hover:text-white px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg transition"
