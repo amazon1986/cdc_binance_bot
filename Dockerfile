@@ -1,22 +1,5 @@
-# Multi-stage Dockerfile for CDC Action Zone Binance Trading Bot
-# Stage 1: Build Frontend and Server Bundle
-FROM node:20-slim AS builder
-
-WORKDIR /app
-
-# Copy package files
-COPY package*.json ./
-
-# Install all dependencies (including devDependencies for build)
-RUN npm ci
-
-# Copy source code
-COPY . .
-
-# Build Vite frontend and Node server bundle
-RUN npm run build
-
-# Stage 2: Production Runner
+# Production Runner for CDC Action Zone Binance Trading Bot
+# Uses pre-built assets to eliminate slow compiles on small 1GB cloud servers
 FROM node:20-slim AS runner
 
 WORKDIR /app
@@ -28,8 +11,8 @@ ENV PORT=3000
 COPY package*.json ./
 RUN npm ci --omit=dev
 
-# Copy compiled assets from builder
-COPY --from=builder /app/dist ./dist
+# Copy compiled assets directly
+COPY dist ./dist
 
 # Create persistent storage folder for bot state and logs
 RUN mkdir -p /app/data
